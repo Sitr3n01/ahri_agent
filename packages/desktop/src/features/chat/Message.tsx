@@ -72,7 +72,7 @@ export const Message = memo(function Message({ role, content, timestamp, images,
         </div>
 
         {/* Bubble Container */}
-        <div className={`flex flex-col gap-1 ${isUser ? 'items-end max-w-[75%]' : 'items-start max-w-[85%]'}`}>
+        <div className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'} flex-1 min-w-0`}>
           {/* Message Bubble */}
           <div
             className={`
@@ -110,128 +110,136 @@ export const Message = memo(function Message({ role, content, timestamp, images,
               </div>
             )}
 
-            {/* Content with react-markdown */}
-            <div className={`text-sm leading-relaxed ${isStreaming ? 'streaming-cursor' : ''} markdown-body`}>
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  code({ className, children, ...props }) {
-                    const match = /language-(\w+)/.exec(className || '');
-                    const codeString = String(children).replace(/\n$/, '');
+            {/* Content with react-markdown or typing indicator */}
+            {content ? (
+              <div className={`text-sm leading-relaxed ${isStreaming ? 'streaming-cursor' : ''} markdown-body`}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    code({ className, children, ...props }) {
+                      const match = /language-(\w+)/.exec(className || '');
+                      const codeString = String(children).replace(/\n$/, '');
 
-                    if (match) {
-                      return (
-                        <div className="relative my-3 group">
-                          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                            <button
-                              onClick={() => handleCopy(codeString)}
-                              className="px-2 py-1 text-[10px] font-mono rounded-md transition-colors"
-                              style={{
+                      if (match) {
+                        return (
+                          <div className="relative my-3 group">
+                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                              <button
+                                onClick={() => handleCopy(codeString)}
+                                className="px-2 py-1 text-[10px] font-mono rounded-md transition-colors"
+                                style={{
+                                  background: 'var(--code-bg)',
+                                  color: 'var(--text-secondary)',
+                                  border: '1px solid var(--glass-border)',
+                                }}
+                              >
+                                COPY
+                              </button>
+                            </div>
+                            {match[1] && (
+                              <div className="text-[10px] font-mono uppercase tracking-wider px-3 pt-2 pb-0" style={{ color: 'var(--text-tertiary)' }}>
+                                {match[1]}
+                              </div>
+                            )}
+                            <SyntaxHighlighter
+                              style={oneDark as any}
+                              language={match[1]}
+                              PreTag="div"
+                              customStyle={{
+                                margin: 0,
+                                padding: '12px',
+                                borderRadius: '12px',
+                                fontSize: '12px',
                                 background: 'var(--code-bg)',
-                                color: 'var(--text-secondary)',
                                 border: '1px solid var(--glass-border)',
                               }}
                             >
-                              COPY
-                            </button>
+                              {codeString}
+                            </SyntaxHighlighter>
                           </div>
-                          {match[1] && (
-                            <div className="text-[10px] font-mono uppercase tracking-wider px-3 pt-2 pb-0" style={{ color: 'var(--text-tertiary)' }}>
-                              {match[1]}
-                            </div>
-                          )}
-                          <SyntaxHighlighter
-                            style={oneDark as any}
-                            language={match[1]}
-                            PreTag="div"
-                            customStyle={{
-                              margin: 0,
-                              padding: '12px',
-                              borderRadius: '12px',
-                              fontSize: '12px',
-                              background: 'var(--code-bg)',
-                              border: '1px solid var(--glass-border)',
-                            }}
-                          >
-                            {codeString}
-                          </SyntaxHighlighter>
+                        );
+                      }
+
+                      // Inline code
+                      return (
+                        <code
+                          className="px-1.5 py-0.5 rounded-md text-xs font-mono"
+                          style={{
+                            background: 'var(--code-bg)',
+                            border: '1px solid var(--glass-border)',
+                          }}
+                          {...props}
+                        >
+                          {children}
+                        </code>
+                      );
+                    },
+                    a({ href, children }) {
+                      return (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: 'var(--persona-primary)', textDecoration: 'underline', textUnderlineOffset: '2px' }}
+                        >
+                          {children}
+                        </a>
+                      );
+                    },
+                    strong({ children }) {
+                      return <strong style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{children}</strong>;
+                    },
+                    p({ children }) {
+                      return <p className="mb-1.5 last:mb-0">{children}</p>;
+                    },
+                    ul({ children }) {
+                      return <ul className="list-disc list-inside mb-2 space-y-0.5">{children}</ul>;
+                    },
+                    ol({ children }) {
+                      return <ol className="list-decimal list-inside mb-2 space-y-0.5">{children}</ol>;
+                    },
+                    blockquote({ children }) {
+                      return (
+                        <blockquote className="border-l-2 pl-3 my-2 italic" style={{ borderColor: 'var(--persona-primary)', color: 'var(--text-secondary)' }}>
+                          {children}
+                        </blockquote>
+                      );
+                    },
+                    table({ children }) {
+                      return (
+                        <div className="overflow-x-auto my-2">
+                          <table className="text-xs border-collapse w-full" style={{ border: '1px solid var(--glass-border)' }}>
+                            {children}
+                          </table>
                         </div>
                       );
-                    }
-
-                    // Inline code
-                    return (
-                      <code
-                        className="px-1.5 py-0.5 rounded-md text-xs font-mono"
-                        style={{
-                          background: 'var(--code-bg)',
-                          border: '1px solid var(--glass-border)',
-                        }}
-                        {...props}
-                      >
-                        {children}
-                      </code>
-                    );
-                  },
-                  a({ href, children }) {
-                    return (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: 'var(--persona-primary)', textDecoration: 'underline', textUnderlineOffset: '2px' }}
-                      >
-                        {children}
-                      </a>
-                    );
-                  },
-                  strong({ children }) {
-                    return <strong style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{children}</strong>;
-                  },
-                  p({ children }) {
-                    return <p className="mb-1.5 last:mb-0">{children}</p>;
-                  },
-                  ul({ children }) {
-                    return <ul className="list-disc list-inside mb-2 space-y-0.5">{children}</ul>;
-                  },
-                  ol({ children }) {
-                    return <ol className="list-decimal list-inside mb-2 space-y-0.5">{children}</ol>;
-                  },
-                  blockquote({ children }) {
-                    return (
-                      <blockquote className="border-l-2 pl-3 my-2 italic" style={{ borderColor: 'var(--persona-primary)', color: 'var(--text-secondary)' }}>
-                        {children}
-                      </blockquote>
-                    );
-                  },
-                  table({ children }) {
-                    return (
-                      <div className="overflow-x-auto my-2">
-                        <table className="text-xs border-collapse w-full" style={{ border: '1px solid var(--glass-border)' }}>
+                    },
+                    th({ children }) {
+                      return (
+                        <th className="px-3 py-1.5 text-left font-semibold" style={{ background: 'var(--code-bg)', borderBottom: '1px solid var(--glass-border)' }}>
                           {children}
-                        </table>
-                      </div>
-                    );
-                  },
-                  th({ children }) {
-                    return (
-                      <th className="px-3 py-1.5 text-left font-semibold" style={{ background: 'var(--code-bg)', borderBottom: '1px solid var(--glass-border)' }}>
-                        {children}
-                      </th>
-                    );
-                  },
-                  td({ children }) {
-                    return (
-                      <td className="px-3 py-1.5" style={{ borderBottom: '1px solid var(--glass-border)' }}>
-                        {children}
-                      </td>
-                    );
-                  },
-                }}
-              >
-                {content}
-              </ReactMarkdown>
-            </div>
+                        </th>
+                      );
+                    },
+                    td({ children }) {
+                      return (
+                        <td className="px-3 py-1.5" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+                          {children}
+                        </td>
+                      );
+                    },
+                  }}
+                >
+                  {content}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <div className="typing-indicator">
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+              </div>
+            )}
           </div>
 
           {/* Timestamp (below bubble) */}

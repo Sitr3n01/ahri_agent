@@ -5,12 +5,88 @@ import { ModelSelector } from '@/components/ModelSelector';
 
 type SearchMode = 'default' | 'web_search' | 'lore_search';
 
+function SpeedModeSelector() {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState('Rápido');
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full transition-all duration-300 hover:bg-white/5 border border-transparent hover:border-white/10"
+        style={{
+          fontSize: '0.8rem',
+          fontFamily: 'var(--font-sans)',
+          fontWeight: 500,
+          color: 'var(--text-secondary)',
+        }}
+      >
+        <span>{mode}</span>
+        <svg
+          width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+          className={`opacity-50 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          className="absolute right-0 bottom-full mb-2 rounded-lg overflow-hidden z-50 min-w-[130px] animate-fade-in"
+          style={{
+            background: 'var(--surface-solid)',
+            border: '1px solid var(--glass-border)',
+            backdropFilter: 'none',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+          }}
+        >
+          {['Rápido', 'Ponderado', 'Profundo'].map((m) => (
+            <button
+              key={m}
+              onClick={() => {
+                setMode(m);
+                setOpen(false);
+              }}
+              className="w-full text-left px-3 py-2 text-xs transition-colors duration-100"
+              style={{
+                color: mode === m ? 'var(--text-primary)' : 'var(--text-secondary)',
+                background: mode === m ? 'var(--surface-hover)' : 'transparent',
+              }}
+              onMouseEnter={(e) => {
+                if (mode !== m) e.currentTarget.style.background = 'var(--surface-hover)';
+              }}
+              onMouseLeave={(e) => {
+                if (mode !== m) e.currentTarget.style.background = 'transparent';
+              }}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ChatInput() {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [searchMode, setSearchMode] = useState<SearchMode>('default');
+  const [isFocused, setIsFocused] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -28,7 +104,7 @@ export function ChatInput() {
     if (!plusMenuOpen) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (plusMenuRef.current && !plusMenuRef.current.contains(target)) {
+      if (plusMenuRef.current && !plusMenuRef.current.contains(target) && !target.closest('#attach-btn')) {
         setPlusMenuOpen(false);
       }
     };
@@ -182,7 +258,7 @@ export function ChatInput() {
 
   return (
     <div
-      className="px-4 pb-4 pt-2 max-w-4xl mx-auto w-full"
+      className="px-4 pb-4 pt-2 max-w-3xl mx-auto w-full"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -220,7 +296,7 @@ export function ChatInput() {
       <div className={`relative ${isDragging ? 'opacity-50' : ''}`}>
         {/* Plus Menu Popup (floating above, anchored right) */}
         {plusMenuOpen && (
-          <div ref={plusMenuRef} className="absolute bottom-full left-0 mb-2 plus-menu z-50 w-[220px]">
+          <div ref={plusMenuRef} className="absolute bottom-full left-0 mb-2 plus-menu animate-fade-in z-50 w-[220px]">
             {/* Tools Section */}
             <div className="plus-menu-section-title">Tools</div>
             <div className="flex flex-col gap-1">
@@ -291,90 +367,116 @@ export function ChatInput() {
           </div>
         )}
 
-        {/* Composer Pill */}
-        <div className="composer-pill">
-          {/* LEFT: Attach button (paperclip) — opens plus menu with tools + attachments */}
-          <button
-            onClick={() => setPlusMenuOpen(!plusMenuOpen)}
-            className={`composer-icon-btn ${plusMenuOpen ? 'active' : ''}`}
-            title="Tools & Attachments"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
-          </button>
+        {/* Unified Composer Pill (Gemini Style) */}
+        <div
+          className={`flex flex-col bg-[var(--sidebar-bg)] rounded-2xl p-2 shadow-lg backdrop-blur-xl transition-all duration-300 ease-out border ${
+            isFocused ? 'border-[var(--persona-primary)] shadow-[0_8px_32px_rgba(0,0,0,0.18)]' : 'border-[var(--glass-border)]'
+          }`}
+        >
+          {/* TOP: Textarea */}
+          <div className="px-2 pt-2 pb-1 relative">
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
+              placeholder={`Converse com ${currentPersona?.display_name || activePersona}...`}
+              rows={1}
+              className="w-full bg-transparent text-[0.95rem] resize-none outline-none max-h-32 placeholder:font-sans placeholder:text-gray-500"
+              style={{
+                color: 'var(--text-primary)',
+                caretColor: 'var(--persona-primary)',
+              }}
+              disabled={isStreaming}
+            />
+          </div>
 
-          {/* CENTER: Textarea */}
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={handleInput}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            placeholder={`Converse com ${currentPersona?.display_name || activePersona}...`}
-            rows={1}
-            className="flex-1 bg-transparent text-sm resize-none outline-none max-h-32 py-2 px-2 placeholder:font-sans placeholder:text-gray-500"
-            style={{
-              color: 'var(--text-primary)',
-              caretColor: 'var(--persona-primary)',
-            }}
-            disabled={isStreaming}
-          />
+          {/* BOTTOM: Actions Row */}
+          <div className="flex justify-between items-center px-1 mt-1">
+            {/* Left Actions */}
+            <div className="flex items-center gap-1.5">
+              {/* Attach / Plus Menu Button */}
+              <button
+                id="attach-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPlusMenuOpen(!plusMenuOpen);
+                }}
+                className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors ${
+                  plusMenuOpen ? 'bg-white/10 text-white' : 'text-[var(--text-tertiary)] hover:bg-white/5 hover:text-white'
+                }`}
+                title="Tools & Attachments"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
 
-          {/* RIGHT: Send button (icon) */}
-          <button
-            onClick={handleSend}
-            disabled={(!text.trim() && attachments.length === 0) || isStreaming}
-            className="composer-send"
-            title="Enviar"
-          >
-            {isStreaming ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <rect x="6" y="6" width="12" height="12" rx="2" />
-              </svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-              </svg>
-            )}
-          </button>
-        </div>
-
-        {/* Meta Bar (below composer) */}
-        <div className="composer-meta">
-          {/* Left: Model selector + tool badge */}
-          <div className="flex items-center gap-3">
-            <ModelSelector compact />
-            {searchMode !== 'default' && (
-              <div className={`tool-badge ${searchMode === 'web_search' ? 'tool-badge-web' : 'tool-badge-lore'}`}>
-                {searchMode === 'web_search' ? (
-                  <>
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              {/* Tools Badges (Web/Lore) */}
+              {searchMode !== 'default' && (
+                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[var(--glass-border)] text-[0.7rem] font-medium transition-colors ${
+                  searchMode === 'web_search' ? 'bg-[var(--info)]/20 text-[var(--info)]' : 'bg-[var(--status-working)]/20 text-[var(--status-working)]'
+                }`}>
+                  {searchMode === 'web_search' ? (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                       <circle cx="12" cy="12" r="10" />
                       <line x1="2" y1="12" x2="22" y2="12" />
                     </svg>
-                    <span>Web</span>
-                  </>
-                ) : (
-                  <>
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  ) : (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
                       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
                     </svg>
-                    <span>Lore</span>
-                  </>
-                )}
-                <button
-                  onClick={() => setSearchMode('default')}
-                  className="hover:opacity-70 transition-opacity ml-0.5"
-                >
-                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
+                  )}
+                  <span>{searchMode === 'web_search' ? 'Deep Research' : 'Lore Search'}</span>
+                  <button
+                    onClick={() => setSearchMode('default')}
+                    className="hover:opacity-100 opacity-60 transition-opacity ml-1"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+
+              {/* Model Selector placed right after the tools as a distinct pill */}
+              <div className="ml-1">
+                <ModelSelector compact />
               </div>
-            )}
+            </div>
+
+            {/* Right Actions */}
+            <div className="flex items-center gap-2">
+              <SpeedModeSelector />
+
+              {/* Sending button */}
+              <button
+                onClick={handleSend}
+                disabled={(!text.trim() && attachments.length === 0) || isStreaming}
+                className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-300 ${
+                  (text.trim() || attachments.length > 0) && !isStreaming
+                    ? 'bg-[var(--persona-primary)] text-white scale-100 hover:scale-110 shadow-md'
+                    : 'bg-[var(--surface-hover)] text-[var(--text-tertiary)] opacity-60 pointer-events-none'
+                }`}
+                title="Enviar"
+              >
+                {isStreaming ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>

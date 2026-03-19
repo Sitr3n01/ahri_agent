@@ -24,6 +24,7 @@
 
   /* ── Glass Surfaces (Deep dark — matched to LoginView rgba(6,4,12)) ── */
   --sidebar-bg: rgba(12, 10, 22, 0.88);
+  --surface-solid: #12101e;
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-shine: rgba(255, 255, 255, 0.05);
   --msg-ai-bg: rgba(18, 16, 30, 0.82);
@@ -100,6 +101,7 @@
 
 [data-theme="light"] {
   --sidebar-bg: rgba(248, 246, 255, 0.55);
+  --surface-solid: #fcfaff;
   --glass-border: rgba(0, 0, 0, 0.08);
   --glass-shine: rgba(255, 255, 255, 0.9);
   --msg-ai-bg: rgba(252, 250, 255, 0.65);
@@ -229,17 +231,9 @@
   color: rgba(0, 0, 0, 0.7);
 }
 
-/* Light mode persona drawer */
+/* Light mode persona drawer toggle */
 [data-theme="light"] .persona-drawer-toggle {
   background: rgba(0, 0, 0, 0.03);
-}
-
-[data-theme="light"] .persona-drawer-content {
-  background: rgba(255, 255, 255, 0.5);
-}
-
-[data-theme="light"] .persona-drawer-list {
-  background: rgba(242, 240, 252, 0.88);
 }
 
 /* Light mode spotify sync */
@@ -463,6 +457,16 @@ pre {
   border: 1px solid var(--glass-border);
 }
 
+/* Base Chat Sidebar (Dark Mode Default) */
+.chat-sidebar {
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--glass-border);
+  box-shadow: 0 8px 32px 0 rgba(0,0,0,0.15);
+  backdrop-filter: blur(40px) saturate(160%);
+  -webkit-backdrop-filter: blur(40px) saturate(160%);
+  transition: transform 0.3s ease, width 0.3s ease;
+}
+
 /* ============================================================
    Scrollbar Styling (V2)
    ============================================================ */
@@ -521,6 +525,58 @@ pre {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 0; }
+  50% { opacity: 0.5; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+
+@keyframes typingBounce {
+  0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 0;
+  min-width: 40px;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  background-color: var(--accent);
+  border-radius: 50%;
+  animation: typingBounce 1.4s infinite ease-in-out both;
+}
+
+.typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+
+.persona-avatar-ring {
+  position: relative;
+  z-index: 2;
+  border: 2px solid var(--accent);
+}
+
+.persona-avatar-ring::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  bottom: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  opacity: 0;
+  animation: pulse-ring 3s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+  pointer-events: none;
 }
 
 @keyframes spin {
@@ -692,30 +748,36 @@ select:focus-visible {
 
 /* User message bubble (right side, V2-style gradient) */
 .chat-bubble-user {
-  border-radius: 24px 24px 4px 24px;
+  border-radius: 20px 20px 4px 20px;
   background: linear-gradient(135deg, var(--persona-primary) 0%, var(--persona-secondary) 100%);
   color: #fff;
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15);
-  padding: 14px 22px;
+  padding: 12px 18px;
   font-size: 0.95rem;
-  line-height: 1.55;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  max-width: 80%;
+  line-height: 1.6;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  max-width: 90%;
+  position: relative;
+  z-index: 2;
+  animation: fadeInUp 0.4s ease-out forwards;
 }
 
 /* Assistant message bubble (left side, V2 glass style) */
 .chat-bubble-assistant {
-  border-radius: 24px 24px 24px 4px;
+  border-radius: 20px 20px 20px 4px;
   background: var(--msg-ai-bg);
   color: var(--msg-ai-text);
   border: 1px solid var(--glass-border);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
-  padding: 14px 24px;
+  padding: 12px 18px;
   font-size: 0.95rem;
-  line-height: 1.65;
+  line-height: 1.6;
   backdrop-filter: blur(15px) saturate(140%);
   -webkit-backdrop-filter: blur(15px) saturate(140%);
-  max-width: 80%;
+  max-width: 90%;
+  position: relative;
+  z-index: 2;
+  animation: fadeInUp 0.4s ease-out forwards;
 }
 
 /* Code blocks inside assistant bubble (V2) */
@@ -780,7 +842,7 @@ select:focus-visible {
   border: none;
   border-radius: 9999px;
   cursor: pointer;
-  transition: color 0.2s ease;
+  transition: all 0.3s ease-out;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -1503,7 +1565,24 @@ select:focus-visible {
   height: 56px;
   overflow: hidden;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid color-mix(in srgb, var(--drawer-color, rgba(255,255,255,0.08)) 30%, transparent);
+  box-shadow: 0 0 10px var(--drawer-shadow, transparent);
+  animation: drawerPulse 3s ease-in-out infinite;
+}
+
+@keyframes drawerPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 10px var(--drawer-shadow, transparent),
+      0 0 20px color-mix(in srgb, var(--drawer-shadow, transparent) 30%, transparent);
+    border-color: color-mix(in srgb, var(--drawer-color, rgba(255,255,255,0.08)) 30%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 15px var(--drawer-shadow, transparent),
+      0 0 32px color-mix(in srgb, var(--drawer-glow, transparent) 40%, transparent);
+    border-color: color-mix(in srgb, var(--drawer-color, rgba(255,255,255,0.08)) 60%, transparent);
+  }
 }
 
 .persona-drawer-toggle-img {
@@ -2014,4 +2093,36 @@ select:focus-visible {
   justify-content: space-between;
   max-width: 800px;
   margin: 0 auto;
+}
+
+@keyframes slideInLeftSidebar {
+  from { opacity: 0; transform: translateX(-30px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(15px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.chat-sidebar {
+  animation: slideInLeftSidebar 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ============================================================
+   Animated Dynamic Logo Text
+   ============================================================ */
+
+.persona-logo-text {
+  background: linear-gradient(135deg, var(--logo-primary) 0%, var(--logo-secondary) 50%, var(--logo-primary) 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: none;
+  animation: textShimmer 4s linear infinite;
+}
+
+@keyframes textShimmer {
+  to { background-position: 200% center; }
 }

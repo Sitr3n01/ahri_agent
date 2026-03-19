@@ -51,15 +51,14 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
       <div className="relative model-selector-container">
         <button
           onClick={() => setOpen(!open)}
-          className="flex items-center gap-1.5 transition-colors duration-150"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full transition-all duration-300 hover:bg-white/5 active:scale-95 border border-transparent"
           style={{
             background: 'transparent',
-            border: 'none',
-            padding: 0,
             cursor: 'pointer',
-            fontSize: '11px',
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--text-tertiary)',
+            fontSize: '0.75rem',
+            fontFamily: 'var(--font-sans)',
+            fontWeight: 500,
+            color: 'var(--text-secondary)',
           }}
         >
           <span
@@ -82,12 +81,12 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
 
         {open && (
           <div
-            className="absolute right-0 bottom-full mb-2 rounded-lg overflow-hidden z-50 min-w-[160px]"
+            className="absolute left-0 bottom-full mb-2 rounded-lg overflow-hidden z-50 min-w-[170px] animate-fade-in"
             style={{
-              background: 'var(--sidebar-bg)',
+              background: 'var(--surface-solid)',
               border: '1px solid var(--glass-border)',
-              backdropFilter: 'blur(30px)',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              backdropFilter: 'none',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
             }}
           >
             {engines.map((engine) => (

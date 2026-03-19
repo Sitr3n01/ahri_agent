@@ -121,17 +121,15 @@ export function PersonaDrawer() {
                     />
                     <div className="persona-drawer-toggle-overlay" />
                     <div className="persona-drawer-toggle-info">
-                        <span className="persona-drawer-toggle-name">
-                            {activePersonaData?.display_name || activePersona}
-                        </span>
                         <svg
-                            width="12"
-                            height="12"
+                            width="14"
+                            height="14"
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
                             strokeWidth="2.5"
                             className={`persona-drawer-chevron ${isOpen ? 'open' : ''}`}
+                            style={{ margin: 'auto' }}
                         >
                             <polyline points="6 9 12 15 18 9" />
                         </svg>
@@ -148,7 +146,7 @@ export function PersonaDrawer() {
                 }}
             >
                 <div className="persona-drawer-list">
-                    {personas.map((p) => {
+                    {personas.filter((p) => p.name !== activePersona).map((p) => {
                         const pTheme = getPersonaTheme(p.name);
                         const isActive = p.name === activePersona;
                         const isHovered = hoveredPersona === p.name;

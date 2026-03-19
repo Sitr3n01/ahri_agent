@@ -23,7 +23,7 @@ export function ChatView() {
     <div className="flex flex-col h-full bg-transparent">
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-6 py-6 scroll-smooth chat-messages-area">
-        <div className="max-w-4xl mx-auto w-full">
+        <div className="max-w-3xl mx-auto w-full">
           {messages.length === 0 && !isStreaming ? (
             /* Empty State — clean, no text */
             <div className="flex-1" />
@@ -51,26 +51,12 @@ export function ChatView() {
 
               {/* Loading indicator (no content yet) */}
               {isStreaming && !streamingContent && (
-                <div className="message-enter mb-5">
-                  <div className="flex items-end gap-3">
-                    <div className="flex-shrink-0 mb-5">
-                      <div className="w-11 h-11 rounded-full persona-avatar-ring">
-                        <img
-                          src={`/${theme.avatar}`}
-                          alt="typing"
-                          className="w-full h-full object-cover rounded-full"
-                        />
-                      </div>
-                    </div>
-                    <div className="chat-bubble-assistant">
-                      <div className="typing-indicator">
-                        <span className="typing-dot" />
-                        <span className="typing-dot" />
-                        <span className="typing-dot" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <MessageBubble
+                  role="assistant"
+                  content=""
+                  timestamp=""
+                  isStreaming
+                />
               )}
             </>
           )}

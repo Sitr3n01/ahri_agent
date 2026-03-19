@@ -80,18 +80,14 @@ export function Sidebar({ mode }: SidebarProps) {
         <div className="px-4 pt-3 pb-2">
           <div className="flex items-center gap-2">
             <span
-              className="text-base font-bold tracking-tight"
+              className="text-lg font-bold tracking-tight persona-logo-text"
               style={{
-                background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`,
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-                textShadow: 'none',
-              }}
+                '--logo-primary': theme.primary,
+                '--logo-secondary': theme.secondary,
+              } as React.CSSProperties}
             >
-              Ahri
+              {personas.find(p => p.name === activePersona)?.display_name || 'Ahri'}
             </span>
-            <span className="text-[10px] font-mono opacity-35">v3</span>
           </div>
         </div>
 
@@ -149,14 +145,19 @@ export function Sidebar({ mode }: SidebarProps) {
 
           {/* Session List */}
           <div className="px-2 pb-2 space-y-0.5">
-            {sessions.slice(0, 15).map((s) => (
+            {sessions.slice(0, 15).map((s, index) => (
               <div
                 key={s.id}
                 className={`group chat-session-item ${s.id === activeSessionId ? 'active' : ''}`}
-                style={s.id === activeSessionId ? {
-                  '--session-color': theme.primary,
-                  '--session-shadow': theme.shadow,
-                } as React.CSSProperties : undefined}
+                style={{
+                  animation: 'fadeInUp 0.4s ease-out forwards',
+                  animationDelay: `${index * 0.04}s`,
+                  opacity: 0,
+                  ...(s.id === activeSessionId && {
+                    '--session-color': theme.primary,
+                    '--session-shadow': theme.shadow,
+                  })
+                } as React.CSSProperties}
                 onClick={() => loadSession(s.id)}
               >
                 {editingSessionId === s.id ? (
@@ -196,7 +197,7 @@ export function Sidebar({ mode }: SidebarProps) {
                           setEditingSessionId(s.id);
                           setEditingTitle(s.title);
                         }}
-                        className="p-1 chat-session-action transition-colors"
+                        className="p-1 chat-session-action transition-all duration-300"
                         style={{ color: 'var(--text-tertiary)' }}
                         title={t('common.rename')}
                       >
@@ -210,7 +211,7 @@ export function Sidebar({ mode }: SidebarProps) {
                           e.stopPropagation();
                           deleteSession(s.id);
                         }}
-                        className="p-1 chat-session-action transition-colors"
+                        className="p-1 chat-session-action transition-all duration-300"
                         style={{ color: 'var(--text-tertiary)' }}
                         title={t('common.delete')}
                       >
@@ -235,18 +236,23 @@ export function Sidebar({ mode }: SidebarProps) {
         {/* Bottom bar — controls */}
         <div className="px-3 py-2 flex-shrink-0 relative" style={{ borderTop: '1px solid var(--glass-border)' }}>
           {/* Slider popover — floats upward */}
-          {sliderOpen && (
-            <div
-              className="absolute left-2 right-2 rounded-lg px-3 py-2"
-              style={{
-                bottom: '100%',
-                marginBottom: '4px',
-                background: 'var(--sidebar-bg)',
-                border: '1px solid var(--glass-border)',
-                backdropFilter: 'blur(30px)',
-                boxShadow: '0 -4px 16px rgba(0,0,0,0.2)',
-              }}
-            >
+          <div
+            className="absolute left-2 right-2 rounded-lg px-3 py-2"
+            style={{
+              bottom: '100%',
+              marginBottom: '4px',
+              background: 'var(--sidebar-bg)',
+              border: '1px solid var(--glass-border)',
+              backdropFilter: 'blur(30px)',
+              boxShadow: '0 -4px 16px rgba(0,0,0,0.2)',
+              transformOrigin: 'bottom center',
+              transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+              opacity: sliderOpen ? 1 : 0,
+              transform: sliderOpen ? 'scale(1) translateY(0)' : 'scale(0.9) translateY(8px)',
+              pointerEvents: sliderOpen ? 'auto' : 'none',
+              zIndex: 50,
+            }}
+          >
               <div className="flex items-center gap-2">
                 <input
                   type="range"
@@ -269,7 +275,6 @@ export function Sidebar({ mode }: SidebarProps) {
                 </span>
               </div>
             </div>
-          )}
           <div className="flex items-center gap-1">
             {/* Slider toggle */}
             <button
@@ -340,18 +345,14 @@ export function Sidebar({ mode }: SidebarProps) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span
-              className="text-base font-bold tracking-tight"
+              className="text-lg font-bold tracking-tight persona-logo-text"
               style={{
-                background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`,
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-                textShadow: 'none',
-              }}
+                '--logo-primary': theme.primary,
+                '--logo-secondary': theme.secondary,
+              } as React.CSSProperties}
             >
-              Ahri
+              {personas.find(p => p.name === activePersona)?.display_name || 'Ahri'}
             </span>
-            <span className="text-[10px] font-mono opacity-35">v3</span>
           </div>
           <button
             onClick={toggleAgentPanel}
@@ -405,10 +406,15 @@ export function Sidebar({ mode }: SidebarProps) {
               Nenhuma execução ainda
             </p>
           )}
-          {executions.slice(0, 20).map((exec) => (
+          {executions.slice(0, 20).map((exec, index) => (
             <div
               key={exec.id}
               className={`group agent-execution-item ${exec.id === activeExecution?.id ? 'active' : ''}`}
+              style={{
+                animation: 'fadeInUp 0.4s ease-out forwards',
+                animationDelay: `${index * 0.04}s`,
+                opacity: 0,
+              } as React.CSSProperties}
               onClick={() => setActiveExecution(exec)}
             >
               <div className="flex items-center justify-between gap-1">
@@ -427,7 +433,7 @@ export function Sidebar({ mode }: SidebarProps) {
                   </span>
                   <button
                     onClick={(e) => { e.stopPropagation(); deleteExecution(exec.id); }}
-                    className="p-0.5 chat-session-action opacity-0 group-hover:opacity-100 transition-colors"
+                    className="p-0.5 chat-session-action opacity-0 group-hover:opacity-100 transition-all duration-300"
                     style={{ color: 'var(--text-tertiary)' }}
                     title={t('common.delete')}
                   >
@@ -460,7 +466,7 @@ export function Sidebar({ mode }: SidebarProps) {
         <div className="px-3 py-1">
           <button
             onClick={clearHistory}
-            className="w-full text-[10px] py-1.5 rounded-lg transition-colors"
+            className="w-full text-[10px] py-1.5 rounded-lg transition-all duration-300"
             style={{ color: 'var(--text-tertiary)' }}
             onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--error)'; e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-tertiary)'; e.currentTarget.style.background = 'transparent'; }}
