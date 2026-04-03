@@ -7,8 +7,13 @@ type SearchMode = 'default' | 'web_search' | 'lore_search';
 
 function SpeedModeSelector() {
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState('Rápido');
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const model = useChatStore((s) => s.model);
+  const reasoningLevel = useChatStore((s) => s.reasoningLevel);
+  const setReasoningLevel = useChatStore((s) => s.setReasoningLevel);
+  const enableThinking = useChatStore((s) => s.enableThinking);
+  const setEnableThinking = useChatStore((s) => s.setEnableThinking);
 
   useEffect(() => {
     if (!open) return;
@@ -21,63 +26,92 @@ function SpeedModeSelector() {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  return (
-    <div className="relative" ref={menuRef}>
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full transition-all duration-300 hover:bg-white/5 border border-transparent hover:border-white/10"
-        style={{
-          fontSize: '0.8rem',
-          fontFamily: 'var(--font-sans)',
-          fontWeight: 500,
-          color: 'var(--text-secondary)',
-        }}
-      >
-        <span>{mode}</span>
-        <svg
-          width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-          className={`opacity-50 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </button>
-
-      {open && (
-        <div
-          className="absolute right-0 bottom-full mb-2 rounded-lg overflow-hidden z-50 min-w-[130px] animate-fade-in"
+  // LOCAL (Ollama/Qwen) — toggle de pensamento on/off
+  if (model === 'LOCAL') {
+    return (
+      <div className="relative" ref={menuRef}>
+        <button
+          onClick={() => setEnableThinking(!enableThinking)}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full transition-all duration-300 hover:bg-white/5 border border-transparent hover:border-white/10"
           style={{
-            background: 'var(--surface-solid)',
-            border: '1px solid var(--glass-border)',
-            backdropFilter: 'none',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+            fontSize: '0.8rem',
+            fontFamily: 'var(--font-sans)',
+            fontWeight: 500,
+            color: enableThinking ? '#F97316' : 'var(--text-secondary)',
+          }}
+          title="Raciocínio Ativo/Desativado"
+        >
+          <span>Pensamento: {enableThinking ? 'Ligado' : 'Desligado'}</span>
+        </button>
+      </div>
+    );
+  }
+
+  // LITE (Gemini 3.1 Flash Lite) — seletor de thinking budget (baixo/médio/alto)
+  if (model === 'LITE') {
+    const GEMINI_LEVELS = [
+      { id: 'low', label: 'Baixo' },
+      { id: 'medium', label: 'Médio' },
+      { id: 'high', label: 'Alto' },
+    ];
+
+    const currentLabel = GEMINI_LEVELS.find(l => l.id === reasoningLevel)?.label || 'Médio';
+
+    return (
+      <div className="relative" ref={menuRef}>
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full transition-all duration-300 hover:bg-white/5 border border-transparent hover:border-white/10"
+          style={{
+            fontSize: '0.8rem',
+            fontFamily: 'var(--font-sans)',
+            fontWeight: 500,
+            color: 'var(--text-secondary)',
           }}
         >
-          {['Rápido', 'Ponderado', 'Profundo'].map((m) => (
-            <button
-              key={m}
-              onClick={() => {
-                setMode(m);
-                setOpen(false);
-              }}
-              className="w-full text-left px-3 py-2 text-xs transition-colors duration-100"
-              style={{
-                color: mode === m ? 'var(--text-primary)' : 'var(--text-secondary)',
-                background: mode === m ? 'var(--surface-hover)' : 'transparent',
-              }}
-              onMouseEnter={(e) => {
-                if (mode !== m) e.currentTarget.style.background = 'var(--surface-hover)';
-              }}
-              onMouseLeave={(e) => {
-                if (mode !== m) e.currentTarget.style.background = 'transparent';
-              }}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+          <span>Pensamento: {currentLabel}</span>
+          <svg
+            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+            className={`opacity-50 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+
+        {open && (
+          <div
+            className="absolute right-0 bottom-full mb-2 rounded-lg overflow-hidden z-50 min-w-[130px] animate-fade-in"
+            style={{
+              background: 'var(--surface-solid)',
+              border: '1px solid var(--glass-border)',
+              backdropFilter: 'none',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+            }}
+          >
+            {GEMINI_LEVELS.map((l) => (
+              <button
+                key={l.id}
+                onClick={() => {
+                  setReasoningLevel(l.id);
+                  setOpen(false);
+                }}
+                className="w-full text-left px-3 py-2 text-xs transition-colors duration-100"
+                style={{
+                  color: reasoningLevel === l.id ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  background: reasoningLevel === l.id ? 'var(--surface-hover)' : 'transparent',
+                }}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // DEEPSEEK (R1) — raciocínio embutido no modelo, sem controle externo
+  return null;
 }
 
 export function ChatInput() {
@@ -87,13 +121,17 @@ export function ChatInput() {
   const [isDragging, setIsDragging] = useState(false);
   const [searchMode, setSearchMode] = useState<SearchMode>('default');
   const [isFocused, setIsFocused] = useState(false);
+  const [errorBanner, setErrorBanner] = useState<{ msg: string; id: number } | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
 
   const isStreaming = useChatStore((s) => s.isStreaming);
+  const streamingEnabled = useChatStore((s) => s.streamingEnabled);
   const sendMessageStreaming = useChatStore((s) => s.sendMessageStreaming);
+  const stopStreaming = useChatStore((s) => s.stopStreaming);
+  const sendMessageHttp = useChatStore((s) => s.sendMessage);
   const activePersona = usePersonaStore((s) => s.activePersona);
   const personas = usePersonaStore((s) => s.personas);
 
@@ -116,6 +154,19 @@ export function ChatInput() {
     const trimmed = text.trim();
     if ((!trimmed && attachments.length === 0) || isStreaming) return;
 
+    const { internetSearchEnabled, globalEnableThinking, enableThinking, model } = useChatStore.getState();
+
+    if (searchMode === 'web_search' && !internetSearchEnabled) {
+      setErrorBanner({ msg: 'A Busca Web está bloqueada. Habilite "Pesquisa na Web" no menu principal de Configurações primeiro.', id: Date.now() });
+      return;
+    }
+    if (model === 'LOCAL' && enableThinking && !globalEnableThinking) {
+      setErrorBanner({ msg: 'Raciocínio bloqueado. Habilite "Raciocínio (Modelos Locais)" no menu principal de Configurações.', id: Date.now() });
+      return;
+    }
+
+    setErrorBanner(null);
+
     // Slash commands
     if (trimmed.startsWith('/')) {
       await handleSlashCommand(trimmed);
@@ -124,13 +175,14 @@ export function ChatInput() {
       return;
     }
 
-    sendMessageStreaming(trimmed, attachments, searchMode);
+    const send = streamingEnabled ? sendMessageStreaming : sendMessageHttp;
+    send(trimmed, attachments, searchMode);
     setText('');
     setAttachments([]);
     setSearchMode('default');
 
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [text, attachments, searchMode, isStreaming, sendMessageStreaming]);
+  }, [text, attachments, searchMode, isStreaming, streamingEnabled, sendMessageStreaming, sendMessageHttp]);
 
   const handleSlashCommand = async (cmd: string) => {
     const { api } = await import('@/api/client');
@@ -258,42 +310,25 @@ export function ChatInput() {
 
   return (
     <div
-      className="px-4 pb-4 pt-2 max-w-3xl mx-auto w-full"
+      className="px-4 pb-4 pt-2 max-w-3xl mx-auto w-full animate-fade-in-up"
+      style={{ animationDuration: '0.4s' }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Attachment preview chips (above composer) */}
-      {attachments.length > 0 && (
-        <div className="flex gap-2 flex-wrap mb-2 px-2">
-          {attachments.map((att, idx) => (
-            <div key={idx} className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs" style={{
-              background: 'var(--button-bg)',
-              border: '1px solid var(--glass-border)',
-              color: 'var(--text-secondary)',
-            }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-              </svg>
-              <span className="font-mono truncate max-w-[120px]">{att.name}</span>
-              <button
-                onClick={() => setAttachments(attachments.filter((_, i) => i !== idx))}
-                className="hover:opacity-70 transition-opacity"
-                style={{ color: 'var(--error)' }}
-              >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Composer Area */}
       <div className={`relative ${isDragging ? 'opacity-50' : ''}`}>
+        {errorBanner && (
+          <div key={errorBanner.id} className="absolute bottom-full left-0 right-0 mb-3 px-3 py-2 rounded-xl flex items-center justify-between text-[11px] font-semibold animate-shake shadow-lg z-50 backdrop-blur-md" style={{ background: 'color-mix(in srgb, var(--error) 15%, var(--surface-elevated))', border: '1px solid color-mix(in srgb, var(--error) 30%, transparent)', color: 'var(--error)' }}>
+            <div className="flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <span>{errorBanner.msg}</span>
+            </div>
+            <button onClick={() => setErrorBanner(null)} className="hover:opacity-70 transition-opacity p-1">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        )}
         {/* Plus Menu Popup (floating above, anchored right) */}
         {plusMenuOpen && (
           <div ref={plusMenuRef} className="absolute bottom-full left-0 mb-2 plus-menu animate-fade-in z-50 w-[220px]">
@@ -370,9 +405,54 @@ export function ChatInput() {
         {/* Unified Composer Pill (Gemini Style) */}
         <div
           className={`flex flex-col bg-[var(--sidebar-bg)] rounded-2xl p-2 shadow-lg backdrop-blur-xl transition-all duration-300 ease-out border ${
-            isFocused ? 'border-[var(--persona-primary)] shadow-[0_8px_32px_rgba(0,0,0,0.18)]' : 'border-[var(--glass-border)]'
+            isFocused ? 'border-[var(--persona-primary)] shadow-[0_16px_48px_rgba(0,0,0,0.25)] -translate-y-2' : 'border-[var(--glass-border)] translate-y-0'
           }`}
         >
+          {/* Attachments Preview Area (Inside Pill) */}
+          {attachments.length > 0 && (
+            <div className="flex gap-2 flex-wrap px-2 pt-2">
+              {attachments.map((att, idx) => (
+                <div 
+                  key={idx} 
+                  className="relative group rounded-xl overflow-hidden border flex-shrink-0 animate-fade-in-up" 
+                  style={{ 
+                    borderColor: 'var(--glass-border)', 
+                    background: 'var(--surface-hover)',
+                    animationDuration: '0.3s',
+                    animationFillMode: 'both',
+                  }}
+                >
+                  {att.type === 'image' && att.preview ? (
+                    <img src={att.preview} alt={att.name} className="w-14 h-14 object-cover" />
+                  ) : (
+                    <div className="w-14 h-14 flex flex-col items-center justify-center p-1">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: att.type === 'pdf' ? 'var(--error)' : 'var(--warning)' }}>
+                        {att.type === 'pdf' ? (
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        ) : (
+                          <polygon points="23 7 16 12 23 17 23 7" />
+                        )}
+                        <polyline points="14 2 14 8 20 8" />
+                      </svg>
+                      <span className="text-[8px] font-mono mt-1 opacity-70 truncate max-w-full px-1">{att.type.toUpperCase()}</span>
+                    </div>
+                  )}
+                  {/* Remove Button Overlay */}
+                  <button
+                    onClick={() => setAttachments(attachments.filter((_, i) => i !== idx))}
+                    className="absolute top-1 right-1 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
+                  >
+                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* TOP: Textarea */}
           <div className="px-2 pt-2 pb-1 relative">
             <textarea
@@ -455,16 +535,19 @@ export function ChatInput() {
             <div className="flex items-center gap-2">
               <SpeedModeSelector />
 
-              {/* Sending button */}
+              {/* Sending / Stop button */}
               <button
-                onClick={handleSend}
-                disabled={(!text.trim() && attachments.length === 0) || isStreaming}
+                onClick={isStreaming ? stopStreaming : handleSend}
+                disabled={(!text.trim() && attachments.length === 0) && !isStreaming}
                 className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-300 ${
-                  (text.trim() || attachments.length > 0) && !isStreaming
+                  (text.trim() || attachments.length > 0 || isStreaming)
                     ? 'bg-[var(--persona-primary)] text-white scale-100 hover:scale-110 shadow-md'
-                    : 'bg-[var(--surface-hover)] text-[var(--text-tertiary)] opacity-60 pointer-events-none'
+                    : 'bg-[var(--surface-hover)] text-[var(--text-tertiary)] opacity-60 pointer-events-none cursor-default'
                 }`}
-                title="Enviar"
+                style={{
+                  background: isStreaming ? 'var(--error)' : undefined
+                }}
+                title={isStreaming ? 'Parar Geração' : 'Enviar'}
               >
                 {isStreaming ? (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">

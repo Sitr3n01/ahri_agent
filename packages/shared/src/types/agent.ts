@@ -18,7 +18,7 @@ export type AgentCapability =
 
 export type PermissionLevel = 'SAFE' | 'CONFIRM' | 'BLOCKED';
 
-export type AgentTaskStatus = 'pending' | 'approved' | 'running' | 'completed' | 'failed';
+export type AgentTaskStatus = 'pending' | 'awaiting_approval' | 'approved' | 'running' | 'completed' | 'failed';
 
 export interface AgentTask {
   id: number;

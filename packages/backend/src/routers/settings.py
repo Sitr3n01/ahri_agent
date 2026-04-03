@@ -2,16 +2,27 @@
 Settings: gerenciar configurações globais da aplicação (Environment Variables).
 """
 import os
+import logging
 from pathlib import Path
+from typing import List, Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic_settings import BaseSettings
+from pydantic import BaseModel, Field
 
+from google import genai
 from src.config import get_settings, Settings
 from src.dependencies import AuthDep
-from src.models.schemas import SettingsSchema, UpdateSettingsRequest, AvailableModelSchema
+from src.models.schemas import (
+    SettingsSchema, 
+    UpdateSettingsRequest, 
+    AvailableModelSchema,
+    GoogleModelInfo,
+    GoogleModelCheckResponse
+)
 
 router = APIRouter()
+logger = logging.getLogger("ahri.settings")
 
 @router.get("", response_model=SettingsSchema)
 async def get_app_settings(auth: AuthDep):
@@ -19,12 +30,17 @@ async def get_app_settings(auth: AuthDep):
     s = get_settings()
     
     return SettingsSchema(
-        google_oauth_client_id=s.google_oauth_client_id,
-        google_oauth_client_secret=s.google_oauth_client_secret,
         gemini_api_key_paid=s.gemini_api_key_paid,
         gemini_api_key_free=s.gemini_api_key_free,
         openrouter_api_key=s.openrouter_api_key,
         openrouter_model_name=s.openrouter_model_name,
+        google_model_pro=s.google_model_pro,
+        google_model_flash=s.google_model_flash,
+        google_model_lite=s.google_model_lite,
+        google_model_vision=s.google_model_vision,
+        google_model_search=s.google_model_search,
+        google_model_memory=s.google_model_memory,
+        ollama_chat_model=s.ollama_chat_model,
         cse_api_key=s.cse_api_key,
         cse_cx=s.cse_cx,
         spotipy_client_id=s.spotipy_client_id,
@@ -40,10 +56,21 @@ async def get_app_settings(auth: AuthDep):
         google_api_key_search=s.google_api_key_search,
         google_api_key_search_b=s.google_api_key_search_b,
         google_ai_studio_api_key=s.google_ai_studio_api_key,
-        google_ai_studio_tpm_limit=s.google_ai_studio_tpm_limit,
         deepinfra_api_key=s.deepinfra_api_key,
         gh_token=s.gh_token,
         gist_id=s.gist_id,
+        agent_mode_rpm_limit=s.agent_mode_rpm_limit,
+        agent_mode_tpm_limit=s.agent_mode_tpm_limit,
+        agent_mode_max_parallel=s.agent_mode_max_parallel,
+        agent_mode_local_model=s.agent_mode_local_model,
+        agent_mode_api_model=s.agent_mode_api_model,
+        compaction_threshold=s.compaction_threshold,
+        compaction_recent_window=s.compaction_recent_window,
+        agent_api_key_1=s.agent_api_key_1,
+        agent_api_key_2=s.agent_api_key_2,
+        agent_api_key_3=s.agent_api_key_3,
+        agent_api_key_4=s.agent_api_key_4,
+        agent_api_key_5=s.agent_api_key_5,
     )
 
 def _update_env_file(root_dir: Path, updates: dict):
@@ -112,6 +139,7 @@ def _update_env_file(root_dir: Path, updates: dict):
                 val_str = f'"{val_str}"'
             new_lines.append(f"{env_key}={val_str}")
             
+    logger.info(f"Updating .env at {env_path} with {len(updates)} keys: {list(updates.keys())}")
     env_path.write_text("\n".join(new_lines), encoding="utf-8")
 
 
@@ -128,6 +156,7 @@ async def update_app_settings(request: UpdateSettingsRequest, auth: AuthDep):
     try:
         _update_env_file(root_dir, updates)
     except Exception as e:
+        print(f"CRITICAL: Failed to update .env: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update .env: {e}")
         
     # 2. Force settings reload
@@ -148,7 +177,6 @@ async def update_app_settings(request: UpdateSettingsRequest, auth: AuthDep):
 
 # Cores padrão por provider
 _PROVIDER_COLORS = {
-    "google_oauth": "#8B5CF6",
     "google_apikey": "#3B82F6",
     "openrouter": "#10B981",
     "ollama": "#F97316",
@@ -162,67 +190,69 @@ _MODEL_COLORS = {
     "gemini-2.0-flash-lite": "#60A5FA",
     "gemini-1.5-pro": "#A78BFA",
     "gemini-1.5-flash": "#67E8F9",
-    "gemma-3-27b-it": "#2563EB",
 }
 
 
 @router.get("/models/available", response_model=list[AvailableModelSchema])
 async def get_available_models(auth: AuthDep):
-    """Retorna lista dinâmica de modelos disponíveis."""
-    from src.services.google_oauth_service import get_google_oauth_service
-    from src.services.llm_service import get_llm_service
-
-    models: list[AvailableModelSchema] = []
-    oauth_svc = get_google_oauth_service()
-    llm_svc = get_llm_service()
-    s = get_settings()
-
-    # 1. Modelos via OAuth (prioridade)
-    if oauth_svc.is_connected:
-        oauth_models = oauth_svc.list_models()
-        for m in oauth_models:
-            model_id = m["id"]
-            models.append(AvailableModelSchema(
-                id=model_id,
-                display_name=m.get("display_name", model_id),
-                provider="google_oauth",
-                color=_MODEL_COLORS.get(model_id, _PROVIDER_COLORS["google_oauth"]),
-                description=m.get("description", ""),
-                input_token_limit=m.get("input_token_limit", 0),
-                output_token_limit=m.get("output_token_limit", 0),
-            ))
-    else:
-        # 2. Modelos via API key (fallback)
-        if s.gemini_primary_key:
-            models.append(AvailableModelSchema(
-                id="PRO",
-                display_name="Gemini Pro",
-                provider="google_apikey",
-                color=_MODEL_COLORS.get("gemini-2.5-pro", "#8B5CF6"),
-            ))
-        if s.gemini_fallback_key:
-            models.append(AvailableModelSchema(
-                id="GOOGLE",
-                display_name="Gemma 27B",
-                provider="google_apikey",
-                color=_MODEL_COLORS.get("gemma-3-27b-it", "#3B82F6"),
-            ))
-
-    # 3. OpenRouter (sempre disponível se configurado)
-    if s.openrouter_api_key:
-        models.append(AvailableModelSchema(
+    """Retorna lista completa de modelos para chat.
+    """
+    models: list[AvailableModelSchema] = [
+        AvailableModelSchema(
+            id="LITE",
+            display_name="Gemini Flash Lite",
+            provider="google_apikey",
+            color="#60A5FA",
+        ),
+        AvailableModelSchema(
             id="DEEPSEEK",
             display_name="DeepSeek R1",
             provider="openrouter",
             color=_PROVIDER_COLORS["openrouter"],
-        ))
-
-    # 4. Ollama (sempre disponível)
-    models.append(AvailableModelSchema(
-        id="LOCAL",
-        display_name="Ollama Local",
-        provider="ollama",
-        color=_PROVIDER_COLORS["ollama"],
-    ))
+        ),
+        AvailableModelSchema(
+            id="LOCAL",
+            display_name="Ollama Local",
+            provider="ollama",
+            color=_PROVIDER_COLORS["ollama"],
+        ),
+    ]
 
     return models
+
+
+class GoogleModelCheckRequest(BaseModel):
+    api_key: str | None = None
+
+
+@router.post("/check-google-models", response_model=GoogleModelCheckResponse)
+async def check_google_models(request: GoogleModelCheckRequest, auth: AuthDep):
+    """Lista modelos disponíveis do Google para a chave fornecida."""
+    api_key = request.api_key
+    
+    if not api_key:
+        s = get_settings()
+        api_key = s.gemini_api_key_paid or s.gemini_api_key_free or s.google_ai_studio_api_key
+        
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key is required or must be configured.")
+        
+    try:
+        client = genai.Client(api_key=api_key)
+        # Lista modelos
+        # O novo SDK retorna um iterador de objetos Model
+        models_list = []
+        for m in client.models.list():
+            # Filtra apenas o que interessa (como no script V2)
+            # No SDK novo (1.0+) o atributo é 'supported_actions'
+            if m.supported_actions and 'generateContent' in m.supported_actions:
+                models_list.append(GoogleModelInfo(
+                    name=m.name,
+                    display_name=m.display_name,
+                    supported_generation_methods=m.supported_actions
+                ))
+        
+        return GoogleModelCheckResponse(models=models_list)
+    except Exception as e:
+        logger.error(f"Error checking Google models: {e}")
+        raise HTTPException(status_code=500, detail=f"Error connecting to Google: {str(e)}")

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useChatStore } from '@/stores/chat-store';
 import { usePersonaStore } from '@/stores/persona-store';
-import { getPersonaTheme } from '@ahri/shared';
+import { usePersonaTheme } from '@/hooks/usePersonaTheme';
 import { Message as MessageBubble } from './Message';
 import { ChatInput } from './ChatInput';
 
@@ -9,10 +9,17 @@ export function ChatView() {
   const messages = useChatStore((s) => s.messages);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const streamingContent = useChatStore((s) => s.streamingContent);
+  const showTimestamps = useChatStore((s) => s.showTimestamps);
+  const loadChatSettings = useChatStore((s) => s.loadChatSettings);
   const activePersona = usePersonaStore((s) => s.activePersona);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const theme = getPersonaTheme(activePersona);
+  const theme = usePersonaTheme();
+
+  // Hydrate chat settings from localStorage on mount
+  useEffect(() => {
+    loadChatSettings();
+  }, []);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -36,6 +43,7 @@ export function ChatView() {
                   content={msg.content}
                   timestamp={msg.timestamp}
                   images={msg.images}
+                  showTimestamp={showTimestamps}
                 />
               ))}
 

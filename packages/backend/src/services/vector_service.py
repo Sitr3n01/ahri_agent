@@ -192,6 +192,86 @@ class VectorService:
         self.ingest_knowledge_base()
         return filename
 
+    def list_memories(self, source_type: str = None, limit: int = 100) -> list[dict]:
+        """Lista memórias com metadata. Filtra por source_type se fornecido."""
+        try:
+            kwargs = {"include": ["documents", "metadatas"]}
+            if source_type:
+                kwargs["where"] = {"type": source_type}
+
+            results = self.collection.get(**kwargs)
+
+            memories = []
+            if results and results["ids"]:
+                for i, doc_id in enumerate(results["ids"][:limit]):
+                    meta = results["metadatas"][i] if results["metadatas"] else {}
+                    content = results["documents"][i] if results["documents"] else ""
+                    memories.append({
+                        "id": doc_id,
+                        "content": content,
+                        "type": meta.get("type", "unknown"),
+                        "filename": meta.get("filename", ""),
+                        "source": meta.get("source", ""),
+                    })
+
+            return memories
+        except Exception as e:
+            logger.error(f"[RAG] list_memories error: {e}")
+            return []
+
+    def get_memory(self, memory_id: str) -> dict | None:
+        """Busca memória por ID."""
+        try:
+            result = self.collection.get(
+                ids=[memory_id],
+                include=["documents", "metadatas"],
+            )
+            if result and result["ids"]:
+                meta = result["metadatas"][0] if result["metadatas"] else {}
+                content = result["documents"][0] if result["documents"] else ""
+                return {
+                    "id": memory_id,
+                    "content": content,
+                    "type": meta.get("type", "unknown"),
+                    "filename": meta.get("filename", ""),
+                    "source": meta.get("source", ""),
+                    "chunk_index": meta.get("chunk_index", 0),
+                    "last_modified": meta.get("last_modified", 0),
+                }
+            return None
+        except Exception as e:
+            logger.error(f"[RAG] get_memory error: {e}")
+            return None
+
+    def update_memory(self, memory_id: str, new_content: str) -> bool:
+        """Atualiza conteúdo de uma memória existente."""
+        try:
+            existing = self.collection.get(ids=[memory_id], include=["metadatas"])
+            if not existing or not existing["ids"]:
+                return False
+
+            self.collection.update(
+                ids=[memory_id],
+                documents=[new_content],
+            )
+            return True
+        except Exception as e:
+            logger.error(f"[RAG] update_memory error: {e}")
+            return False
+
+    def delete_memory(self, memory_id: str) -> bool:
+        """Deleta memória por ID."""
+        try:
+            existing = self.collection.get(ids=[memory_id])
+            if not existing or not existing["ids"]:
+                return False
+
+            self.collection.delete(ids=[memory_id])
+            return True
+        except Exception as e:
+            logger.error(f"[RAG] delete_memory error: {e}")
+            return False
+
     def search_memory(self, query: str, n_results: int = 4, threshold: float = 1.25) -> str:
         """Busca semântica na memória. Retorna texto formatado com labels."""
         try:
@@ -223,6 +303,160 @@ class VectorService:
         except Exception as e:
             logger.error(f"[RAG Search] Error: {e}")
             return ""
+
+    # =========================================================================
+    # Memory Management (Settings UI)
+    # =========================================================================
+
+    def list_files_on_disk(self) -> list[dict]:
+        """Lista todos os arquivos de rag_docs/ e knowledge/ com metadados."""
+        files = []
+        sources = [
+            (self.rag_docs_dir, "static_lore"),
+            (self.knowledge_dir, "dynamic_knowledge"),
+        ]
+        for dir_path, source_type in sources:
+            if not dir_path.exists():
+                continue
+            for file_path in dir_path.glob("*.*"):
+                if file_path.suffix not in (".txt", ".md"):
+                    continue
+                stat = file_path.stat()
+                chunk_count = self.get_chunk_count_for_file(file_path.name, source_type)
+                files.append({
+                    "filename": file_path.name,
+                    "source_type": source_type,
+                    "size_bytes": stat.st_size,
+                    "chunk_count": chunk_count,
+                    "last_modified": stat.st_mtime,
+                })
+        return files
+
+    def get_file_absolute_path(self, filename: str, source_type: str) -> Path | None:
+        """Retorna o caminho absoluto do arquivo no disco."""
+        if source_type == "static_lore":
+            file_path = self.rag_docs_dir / filename
+        else:
+            file_path = self.knowledge_dir / filename
+
+        if file_path.exists():
+            return file_path.resolve()
+        return None
+
+    def get_chunk_count_for_file(self, filename: str, source_type: str) -> int:
+        """Retorna quantos chunks existem no ChromaDB para um arquivo."""
+        try:
+            results = self.collection.get(
+                where={"$and": [{"filename": filename}, {"type": source_type}]},
+            )
+            return len(results["ids"]) if results and results["ids"] else 0
+        except Exception:
+            # Fallback: try without $and (older ChromaDB versions)
+            try:
+                results = self.collection.get(where={"filename": filename})
+                return len(results["ids"]) if results and results["ids"] else 0
+            except Exception as e:
+                logger.warning(f"[RAG] get_chunk_count_for_file error: {e}")
+                return 0
+
+    def delete_file_and_chunks(self, filename: str, source_type: str) -> int:
+        """Deleta arquivo do disco + TODOS os chunks do ChromaDB + entrada no tracker.
+        Corrige o bug da V2 onde esquecer não removia o arquivo do disco."""
+        deleted_chunks = 0
+
+        # 1. Delete ChromaDB chunks
+        try:
+            results = self.collection.get(where={"filename": filename})
+            if results and results["ids"]:
+                self.collection.delete(ids=results["ids"])
+                deleted_chunks = len(results["ids"])
+                logger.info(f"[RAG] Deleted {deleted_chunks} chunks for {filename}")
+        except Exception as e:
+            logger.error(f"[RAG] Error deleting chunks for {filename}: {e}")
+
+        # 2. Delete physical file from disk
+        if source_type == "static_lore":
+            file_path = self.rag_docs_dir / filename
+        else:
+            file_path = self.knowledge_dir / filename
+
+        if file_path.exists():
+            try:
+                file_path.unlink()
+                logger.info(f"[RAG] Deleted file: {file_path}")
+            except Exception as e:
+                logger.error(f"[RAG] Error deleting file {file_path}: {e}")
+
+        # 3. Remove tracker entry
+        tracker_file = self.persona_dir / "rag_tracker.json"
+        if tracker_file.exists():
+            try:
+                tracker = json.loads(tracker_file.read_text())
+                tracker_key = f"{source_type}/{filename}"
+                if tracker_key in tracker:
+                    del tracker[tracker_key]
+                    tracker_file.write_text(json.dumps(tracker))
+                    logger.info(f"[RAG] Removed tracker entry: {tracker_key}")
+            except Exception as e:
+                logger.error(f"[RAG] Error updating tracker: {e}")
+
+        return deleted_chunks
+
+    def get_collection_stats(self) -> dict:
+        """Retorna estatísticas da coleção ChromaDB."""
+        stats = {"total": 0, "by_type": {}}
+        try:
+            all_data = self.collection.get(include=["metadatas"])
+            if all_data and all_data["ids"]:
+                stats["total"] = len(all_data["ids"])
+                for meta in (all_data["metadatas"] or []):
+                    m_type = meta.get("type", "unknown") if meta else "unknown"
+                    stats["by_type"][m_type] = stats["by_type"].get(m_type, 0) + 1
+        except Exception as e:
+            logger.error(f"[RAG] get_collection_stats error: {e}")
+        return stats
+
+    def force_reindex(self) -> int:
+        """Limpa tracker e re-ingere toda a base de conhecimento."""
+        tracker_file = self.persona_dir / "rag_tracker.json"
+        if tracker_file.exists():
+            try:
+                tracker_file.write_text("{}")
+            except Exception as e:
+                logger.error(f"[RAG] Error clearing tracker: {e}")
+
+        return self.ingest_knowledge_base()
+
+    def search_with_metadata(self, query: str, source_type: str | None = None, limit: int = 20) -> list[dict]:
+        """Busca semântica retornando resultados estruturados com metadata."""
+        try:
+            kwargs: dict = {
+                "query_texts": [query],
+                "n_results": min(limit, 50),
+                "include": ["documents", "metadatas", "distances"],
+            }
+            if source_type:
+                kwargs["where"] = {"type": source_type}
+
+            results = self.collection.query(**kwargs)
+
+            memories = []
+            if results["documents"]:
+                for i, doc in enumerate(results["documents"][0]):
+                    meta = results["metadatas"][0][i] if results["metadatas"] else {}
+                    dist = results["distances"][0][i] if results["distances"] else 0
+                    memories.append({
+                        "id": results["ids"][0][i] if results["ids"] else "",
+                        "content": doc,
+                        "type": meta.get("type", "unknown"),
+                        "filename": meta.get("filename", ""),
+                        "source": meta.get("source", ""),
+                        "distance": dist,
+                    })
+            return memories
+        except Exception as e:
+            logger.error(f"[RAG] search_with_metadata error: {e}")
+            return []
 
 
 # Cache de instâncias por persona

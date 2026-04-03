@@ -23,6 +23,11 @@ function getStoredTheme(): AppTheme {
 function applyTheme(theme: AppTheme) {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem(STORAGE_KEY, theme);
+    
+    // Notify Electron main process to update native titlebar overlay
+    if (typeof window !== 'undefined' && (window as any).ahri?.window?.setTheme) {
+        (window as any).ahri.window.setTheme(theme);
+    }
 }
 
 export const useThemeStore = create<ThemeState>((set) => {

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { usePersonaStore } from '@/stores/persona-store';
-import { getPersonaTheme } from '@ahri/shared';
+import { usePersonaTheme } from '@/hooks/usePersonaTheme';
+import { mergePersonaTheme } from '@ahri/shared';
 
 /**
  * Per-persona image position config.
@@ -37,13 +38,14 @@ export function PersonaDrawer() {
     const isLoading = usePersonaStore((s) => s.isLoading);
     const error = usePersonaStore((s) => s.error);
     const fetchPersonas = usePersonaStore((s) => s.fetchPersonas);
+    const getMergedTheme = usePersonaStore((s) => s.getMergedTheme);
 
     const [isOpen, setIsOpen] = useState(false);
     const [hoveredPersona, setHoveredPersona] = useState<string | null>(null);
     const drawerRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
 
-    const activeTheme = getPersonaTheme(activePersona);
+    const activeTheme = usePersonaTheme();
     const activePersonaData = personas.find((p) => p.name === activePersona);
 
     // Close drawer when clicking outside
@@ -141,13 +143,10 @@ export function PersonaDrawer() {
             <div
                 className={`persona-drawer-content ${isOpen ? 'open' : ''}`}
                 ref={contentRef}
-                style={{
-                    maxHeight: isOpen ? '420px' : '0px',
-                }}
             >
                 <div className="persona-drawer-list">
                     {personas.filter((p) => p.name !== activePersona).map((p) => {
-                        const pTheme = getPersonaTheme(p.name);
+                        const pTheme = getMergedTheme(p.name);
                         const isActive = p.name === activePersona;
                         const isHovered = hoveredPersona === p.name;
 
@@ -171,6 +170,8 @@ export function PersonaDrawer() {
                                         alt={p.display_name}
                                         className="persona-drawer-item-image"
                                         style={{ objectPosition: getImagePosition(p.name) }}
+                                        loading="lazy"
+                                        decoding="async"
                                         draggable={false}
                                         onError={(e) => {
                                             const target = e.target as HTMLImageElement;

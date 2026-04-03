@@ -67,20 +67,22 @@ export function ImageUpload({
       <label className="block text-xs font-mono mb-2" style={{ color: 'var(--text-tertiary)' }}>
         {label}
       </label>
-      <div className="flex items-center gap-4">
-        {/* Preview */}
-        <div
-          className={`
-            flex-shrink-0 overflow-hidden border-2
-            ${previewShape === 'circle' ? 'rounded-full' : 'rounded-sm'}
-          `}
-          style={{ width: previewSize.width, height: previewSize.height, borderColor: 'var(--glass-border)' }}
-        >
-          <img
-            src={`/${currentImage}`}
-            alt="Preview"
-            className="w-full h-full object-cover"
-          />
+      <div className="flex items-start gap-6">
+        {/* Preview Area (Fixed width for alignment) */}
+        <div className="w-32 sm:w-40 flex-shrink-0">
+          <div
+            className={`
+              overflow-hidden border-2 mx-auto
+              ${previewShape === 'circle' ? 'rounded-full' : 'rounded-xl'}
+            `}
+            style={{ width: previewSize.width, height: previewSize.height, borderColor: 'var(--glass-border)' }}
+          >
+            <img
+              src={`/${currentImage}`}
+              alt="Preview"
+              className="w-full h-full object-cover"
+            />
+          </div>
         </div>
 
         {/* Upload Area */}

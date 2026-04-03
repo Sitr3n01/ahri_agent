@@ -1,28 +1,13 @@
 import React, { useState, useEffect, DragEvent } from 'react';
 import { useT } from '@/stores/i18n-store';
+import { FileText, Scroll, Book, ExternalLink, Folder, Trash2 } from 'lucide-react';
 
-// Typings for the Electron bridge
-declare global {
-    interface Window {
-        ahri?: {
-            agent: {
-                openFile: (path: string) => Promise<void>;
-                readFile: (path: string) => Promise<string>;
-                writeFile: (path: string, content: string) => Promise<{ success: true }>;
-                listDir: (path: string) => Promise<string[]>;
-                getPaths: () => Promise<{ root: string; data: string; personas: string }>;
-            };
-            isElectron?: boolean;
-        };
-    }
-}
 
 interface PersonaFileInfo {
     name: string;
     path: string;
     exists: boolean;
     sizeBytes?: number;
-    preview?: string;
 }
 
 interface PersonaFilesProps {
@@ -57,8 +42,10 @@ export function PersonaFilesPanel({ personaName, basePath }: PersonaFilesProps) 
         const agent = window.ahri.agent;
         let personaDir = basePath;
 
-        // Resolve absolute path if in Electron
-        if (isElectron) {
+        // Read Electron status directly — isElectron state may not have committed yet
+        // (React state updates are async; calling loadFileInfo() right after setIsElectron()
+        // in the same useEffect would still see the old false value)
+        if (!!window.ahri?.isElectron) {
             try {
                 const paths = await agent.getPaths();
                 // Ensure we use the correct absolute path for the persona
@@ -79,7 +66,6 @@ export function PersonaFilesPanel({ personaName, basePath }: PersonaFilesProps) 
 
         const keyFiles = [
             { name: 'persona.md', path: `${personaDir}/persona.md`, label: 'persona.persona_md' as const },
-            { name: 'memory.json', path: `${personaDir}/memory.json`, label: 'persona.memory_json' as const },
             { name: 'memoria_legada.md', path: `${personaDir}/knowledge/memoria_legada.md`, label: 'persona.legacy_memory' as const },
         ];
 
@@ -89,14 +75,11 @@ export function PersonaFilesPanel({ personaName, basePath }: PersonaFilesProps) 
             try {
                 const content = await agent.readFile(kf.path);
                 const sizeBytes = new Blob([content]).size;
-                // Generate preview: first 120 chars
-                const preview = content.slice(0, 150).replace(/\n/g, ' ').trim();
                 loaded.push({
                     name: kf.name,
                     path: kf.path,
                     exists: true,
                     sizeBytes,
-                    preview: preview.length > 120 ? preview.slice(0, 120) + '…' : preview,
                 });
             } catch {
                 loaded.push({
@@ -120,9 +103,27 @@ export function PersonaFilesPanel({ personaName, basePath }: PersonaFilesProps) 
         }
     };
 
-    const handleOpenFile = async (filePath: string) => {
+    const handleOpenFile = async (path: string) => {
         if (window.ahri?.agent) {
-            await window.ahri.agent.openFile(filePath);
+            await window.ahri.agent.openFile(path);
+        }
+    };
+
+    const handleRemoveFile = async (file: PersonaFileInfo) => {
+        if (!isElectron || !file.exists) return;
+        
+        const confirmed = confirm(`Tem certeza que deseja remover o arquivo ${file.name}? Esta ação não pode ser desfeita.`);
+        if (!confirmed) return;
+
+        try {
+            if (window.ahri?.agent) {
+                await window.ahri.agent.deleteFile(file.path);
+            }
+            // Refresh list
+            loadFileInfo();
+        } catch (error) {
+            console.error('Failed to remove file:', error);
+            alert('Falha ao remover o arquivo.');
         }
     };
 
@@ -206,21 +207,16 @@ export function PersonaFilesPanel({ personaName, basePath }: PersonaFilesProps) 
         return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     };
 
-    const fileDescriptions: Record<string, { label: string; desc: string; icon: string }> = {
+    const fileDescriptions: Record<string, { label: string; desc: string; icon: React.ReactNode }> = {
         'persona.md': {
             label: t('persona.persona_md'),
             desc: t('persona.persona_md_desc'),
-            icon: '📝',
-        },
-        'memory.json': {
-            label: t('persona.memory_json'),
-            desc: t('persona.memory_json_desc'),
-            icon: '🧠',
+            icon: <FileText size={18} />,
         },
         'memoria_legada.md': {
             label: t('persona.legacy_memory'),
             desc: t('persona.legacy_memory_desc'),
-            icon: '📜',
+            icon: <Scroll size={18} />,
         },
     };
 
@@ -228,7 +224,7 @@ export function PersonaFilesPanel({ personaName, basePath }: PersonaFilesProps) 
         <div className="space-y-4">
             {/* Key persona files */}
             {files.map((file) => {
-                const info = fileDescriptions[file.name] || { label: file.name, desc: '', icon: '📄' };
+                const info = fileDescriptions[file.name] || { label: file.name, desc: '', icon: <FileText size={18} /> };
                 const isDragging = draggingFile === file.name;
 
                 return (
@@ -241,7 +237,7 @@ export function PersonaFilesPanel({ personaName, basePath }: PersonaFilesProps) 
                         onDrop={(e) => handleDrop(e, file.name)}
                     >
                         <div className="flex items-start gap-3">
-                            <span className="text-lg flex-shrink-0 mt-0.5">{info.icon}</span>
+                            <span className="flex-shrink-0 mt-1" style={{ color: 'var(--persona-primary)' }}>{info.icon}</span>
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
                                     <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -262,28 +258,29 @@ export function PersonaFilesPanel({ personaName, basePath }: PersonaFilesProps) 
                                     {info.desc}
                                 </p>
 
-                                {/* File preview */}
-                                {file.exists && file.preview && (
-                                    <div className="mt-2 px-3 py-2 rounded text-[11px] font-mono leading-relaxed" style={{ background: 'var(--code-bg)', color: 'var(--text-tertiary)', border: '1px solid var(--glass-border)' }}>
-                                        {file.preview}
-                                    </div>
-                                )}
                             </div>
 
                             {/* Actions */}
-                            <div className="flex flex-col gap-1 flex-shrink-0">
+                            <div className="flex flex-row items-center gap-2 flex-shrink-0">
                                 {file.exists && isElectron && (
                                     <button
                                         onClick={() => handleOpenFile(file.path)}
                                         className="persona-file-action-btn"
                                         title={t('persona.open_file')}
                                     >
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                                            <polyline points="15 3 21 3 21 9" />
-                                            <line x1="10" y1="14" x2="21" y2="3" />
-                                        </svg>
+                                        <ExternalLink size={14} />
                                         <span className="text-[10px]">{t('persona.open_file')}</span>
+                                    </button>
+                                )}
+
+                                {isElectron && file.exists && (
+                                    <button
+                                        onClick={() => handleRemoveFile(file)}
+                                        className="persona-file-action-btn text-red-100 hover:text-red-500 hover:bg-red-500/10"
+                                        title="Remover"
+                                    >
+                                        <Trash2 size={14} />
+                                        <span className="text-[10px]">Remover</span>
                                     </button>
                                 )}
                             </div>
@@ -314,7 +311,7 @@ export function PersonaFilesPanel({ personaName, basePath }: PersonaFilesProps) 
             {/* Knowledge folder card */}
             <div className="persona-file-card">
                 <div className="flex items-start gap-3">
-                    <span className="text-lg flex-shrink-0 mt-0.5">📚</span>
+                    <span className="flex-shrink-0 mt-1" style={{ color: 'var(--persona-primary)' }}><Book size={18} /></span>
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                             <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -329,18 +326,18 @@ export function PersonaFilesPanel({ personaName, basePath }: PersonaFilesProps) 
                         </p>
                     </div>
 
-                    {isElectron && (
-                        <button
-                            onClick={handleOpenFolder}
-                            className="persona-file-action-btn"
-                            title={t('persona.open_folder')}
-                        >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                            </svg>
-                            <span className="text-[10px]">{t('persona.open_folder')}</span>
-                        </button>
-                    )}
+                    <div className="flex flex-row items-center gap-2 flex-shrink-0">
+                        {isElectron && (
+                            <button
+                                onClick={handleOpenFolder}
+                                className="persona-file-action-btn"
+                                title={t('persona.open_folder')}
+                            >
+                                <Folder size={14} />
+                                <span className="text-[10px]">{t('persona.open_folder')}</span>
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

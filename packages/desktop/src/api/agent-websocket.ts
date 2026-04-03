@@ -43,6 +43,7 @@ export class AgentWebSocket {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 3;
   private reconnectDelay = 2000;
+  private disposed = false;  // Prevents reconnection after manual close
 
   constructor(executionId: number, handlers: AgentWSHandlers) {
     this.executionId = executionId;
@@ -50,6 +51,8 @@ export class AgentWebSocket {
   }
 
   connect() {
+    if (this.disposed) return;
+
     const wsUrl = `ws://localhost:8742/agent-mode/ws/${this.executionId}`;
 
     this.ws = new WebSocket(wsUrl);
@@ -68,20 +71,25 @@ export class AgentWebSocket {
       }
     };
 
-    this.ws.onerror = (error) => {
-      console.error('[AgentWS] WebSocket error:', error);
-      this.handlers.onError?.('WebSocket connection error');
+    this.ws.onerror = () => {
+      // Only report errors if not disposed (user-initiated close doesn't need error)
+      if (!this.disposed) {
+        console.error('[AgentWS] WebSocket error for execution', this.executionId);
+        this.handlers.onError?.('WebSocket connection error');
+      }
     };
 
     this.ws.onclose = () => {
       console.log('[AgentWS] Connection closed');
-      this.handlers.onClose?.();
+      if (!this.disposed) {
+        this.handlers.onClose?.();
 
-      // Attempt reconnect if not max attempts
-      if (this.reconnectAttempts < this.maxReconnectAttempts) {
-        this.reconnectAttempts++;
-        console.log(`[AgentWS] Reconnecting... (attempt ${this.reconnectAttempts})`);
-        setTimeout(() => this.connect(), this.reconnectDelay);
+        // Attempt reconnect if not max attempts and not manually closed
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.reconnectAttempts++;
+          console.log(`[AgentWS] Reconnecting... (attempt ${this.reconnectAttempts})`);
+          setTimeout(() => this.connect(), this.reconnectDelay);
+        }
       }
     };
   }
@@ -129,6 +137,7 @@ export class AgentWebSocket {
   }
 
   close() {
+    this.disposed = true;  // Prevent reconnection and error reporting
     if (this.ws) {
       this.ws.close();
       this.ws = null;

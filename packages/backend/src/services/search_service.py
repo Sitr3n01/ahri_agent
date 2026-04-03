@@ -26,6 +26,9 @@ class SearchService:
 
     async def check_quota(self) -> tuple[bool, int]:
         """Verifica e retorna (pode_buscar, restante)."""
+        if not self.db:
+            return True, 90  # No DB session — skip quota check
+
         today = date.today().isoformat()
         max_daily = 90
 
@@ -43,6 +46,9 @@ class SearchService:
 
     async def _increment_quota(self):
         """Incrementa o contador de quota."""
+        if not self.db:
+            return  # No DB session — skip quota tracking
+
         today = date.today().isoformat()
 
         result = await self.db.execute(select(SearchQuota).where(SearchQuota.id == 1))

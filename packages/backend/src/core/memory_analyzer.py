@@ -35,7 +35,8 @@ def _get_rest_client() -> Optional[GeminiClient]:
     key = settings.memory_key
     if not key:
         return None
-    return GeminiClient(key, "gemma-3-27b-it")
+    model_name = getattr(settings, "google_model_lite", "gemini-3.1-flash-lite-preview")
+    return GeminiClient(key, model_name)
 
 
 def analyze_incremental(user_msg: str, ai_msg: str, current_profile: dict) -> Optional[dict]:
@@ -76,6 +77,95 @@ def analyze_incremental(user_msg: str, ai_msg: str, current_profile: dict) -> Op
     except Exception as e:
         logger.error(f"Incremental parse error: {e}")
         return None
+
+
+TIER_MAP = {
+    "IMMEDIATE":    "immediate_context",
+    "TOP_OF_MIND":  "top_of_mind",
+    "RECENT_FACT":  "recent_history",
+    "WORK_FACT":    "work_context",
+    "PERSONAL":     "personal_context",
+    "LONGTERM":     "long_term_background",
+    "IGNORE":       None,
+}
+
+
+def analyze_incremental_v2(user_msg: str, ai_msg: str) -> list[dict]:
+    """
+    V2 memory classifier — maps interaction facts to hierarchical tiers.
+
+    Returns a list of dicts:
+      [{"action": "IMMEDIATE"|"TOP_OF_MIND"|...|"IGNORE",
+        "content": "...",
+        "importance": 1-10,
+        "tags": [...]}, ...]
+
+    Returns [] on IGNORE, API failure, or parse error.
+    """
+    client = _get_rest_client()
+    if not client:
+        return []
+
+    prompt = f"""[MEMORY CLASSIFIER - STRICT JSON]
+Analise a troca de mensagens e identifique fatos duráveis sobre o usuário.
+Cada fato deve ser classificado em exatamente um tier.
+
+TIERS:
+- IMMEDIATE: Estado emocional agora. Eventos de hoje. Expira em 48h.
+- TOP_OF_MIND: Projeto ativo, preocupação recorrente. Mencionado ≥2x recentemente.
+- RECENT_FACT: Algo que aconteceu nos últimos 7-14 dias.
+- WORK_FACT: Emprego, carreira, stack técnico, projetos em andamento.
+- PERSONAL: Relacionamentos, hobbies, valores, traços de personalidade.
+- LONGTERM: Dados biográficos estáveis (local de nascimento, língua nativa, eventos definidores).
+- IGNORE: Bate-papo casual, cumprimentos, piadas, pedidos sem conteúdo factual.
+
+USUÁRIO: "{user_msg}"
+IA: "{ai_msg}"
+
+Retorne APENAS um array JSON (pode ser vazio []):
+[
+  {{
+    "action": "IMMEDIATE|TOP_OF_MIND|RECENT_FACT|WORK_FACT|PERSONAL|LONGTERM|IGNORE",
+    "content": "declaração concisa em terceira pessoa sobre o usuário",
+    "importance": 1-10,
+    "tags": ["tag_opcional"]
+  }}
+]
+
+Se nada for relevante, retorne: []"""
+
+    resp_text = client.generate_content_rest(prompt, temperature=0.0)
+    if not resp_text:
+        return []
+
+    try:
+        # Handle both array and wrapped responses
+        cleaned = resp_text.strip()
+        # Try to find JSON array
+        match = re.search(r'\[[\s\S]*\]', cleaned)
+        if not match:
+            return []
+        results = json.loads(match.group(0))
+        if not isinstance(results, list):
+            return []
+        # Filter out IGNORE items and invalid entries
+        valid = []
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            action = item.get("action", "IGNORE")
+            if action == "IGNORE" or action not in TIER_MAP:
+                continue
+            valid.append({
+                "action": action,
+                "content": str(item.get("content", "")).strip(),
+                "importance": max(1, min(10, int(item.get("importance", 5)))),
+                "tags": [str(t) for t in item.get("tags", []) if isinstance(t, str)],
+            })
+        return valid
+    except Exception as e:
+        logger.error(f"analyze_incremental_v2 parse error: {e}")
+        return []
 
 
 def process_smart_save(messages: list[dict], current_profile: dict) -> tuple[dict, str]:

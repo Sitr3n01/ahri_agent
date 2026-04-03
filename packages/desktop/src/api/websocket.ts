@@ -123,10 +123,12 @@ export class ChatWebSocket {
   sendMessage(
     message: string,
     model: string,
+    sessionId?: number,
     images: string[] = [],
     video?: { data: string; name: string },
     pdfs?: { data: string; name: string }[],
-    mode: 'default' | 'web_search' | 'lore_search' = 'default'
+    mode: 'default' | 'web_search' | 'lore_search' = 'default',
+    reasoning?: { reasoning_level?: string; enable_thinking?: boolean; auto_save_tags?: boolean }
   ) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.onError('WebSocket not connected');
@@ -142,10 +144,14 @@ export class ChatWebSocket {
         type: 'message',
         message,
         model,
+        session_id: sessionId,
         images,
         video,
         pdfs,
         mode,
+        reasoning_level: reasoning?.reasoning_level,
+        enable_thinking: reasoning?.enable_thinking,
+        auto_save_tags: reasoning?.auto_save_tags,
       }),
     );
   }
@@ -178,6 +184,12 @@ export class ChatWebSocket {
       this.ws = null;
     }
     this.isConnecting = false;
+  }
+
+  cancel() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'cancel' }));
+    }
   }
 
   get isConnected(): boolean {

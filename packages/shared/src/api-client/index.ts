@@ -7,9 +7,17 @@ import type { TokenResponse, HealthResponse } from '../types/api.js';
 import type { PersonaListResponse, PersonaDetail } from '../types/persona.js';
 import type { ChatRequest, ChatResponse, SessionSummary, SessionDetail } from '../types/chat.js';
 import type { AgentTask } from '../types/agent.js';
-import type { AgentExecution, AgentWorkerTask, AgentModeExecuteRequest } from '../types/agent-mode.js';
-import type { UserProfile, SpotifyContext } from '../types/memory.js';
-import type { AvailableModel, OAuthStatus } from '../types/llm.js';
+import type { AgentExecution, AgentSession, AgentWorkerTask, AgentModeExecuteRequest } from '../types/agent-mode.js';
+import type {
+  UserProfile, SpotifyContext, AutoProfile, AutoProfilePatch,
+  RagFileInfo, RagStats, RagMemoryItem, SocialGraphPlatform,
+  EpisodicMemoryEntry, ForgetResponse,
+  PersonaMemoryData, PersonaMemoryPatch,
+  // v3.2.0 dual-layer memory
+  UserPreferences, SemanticMemoryItem, SemanticTiersResponse,
+  MemoryTier, AddSemanticFactRequest, MigrateLegacyResponse,
+} from '../types/memory.js';
+import type { AvailableModel, GoogleModelCheckResponse } from '../types/llm.js';
 
 export interface AhriClientConfig {
   baseUrl: string;
@@ -237,6 +245,10 @@ export class AhriApiClient {
     return this.request<{ status: string; profile: UserProfile }>('POST', '/memory/profile', profile);
   }
 
+  async synthesizeProfile(): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>('POST', '/memory/profile/synthesize');
+  }
+
   async saveMemory(title: string, content: string): Promise<void> {
     await this.request<unknown>('POST', '/memory/save', { title, content });
   }
@@ -245,8 +257,126 @@ export class AhriApiClient {
     await this.request<unknown>('POST', '/memory/learn', { topic, content });
   }
 
-  async forgetFact(topic: string): Promise<void> {
-    await this.request<unknown>('POST', '/memory/forget', { topic });
+  async forgetFact(topic: string): Promise<ForgetResponse> {
+    return this.request<ForgetResponse>('POST', '/memory/forget', { topic });
+  }
+
+  async listMemories(sourceType?: string): Promise<{ memories: Array<{ id: string; content: string; type: string; filename: string; source: string }>; total: number; persona: string }> {
+    const query = sourceType ? `?source_type=${encodeURIComponent(sourceType)}` : '';
+    return this.request('GET', `/memory/list${query}`);
+  }
+
+  async getMemory(id: string): Promise<{ id: string; content: string; type: string; filename: string; source: string }> {
+    return this.request('GET', `/memory/${encodeURIComponent(id)}`);
+  }
+
+  async updateMemory(id: string, content: string): Promise<{ status: string; id: string }> {
+    return this.request('PUT', `/memory/${encodeURIComponent(id)}`, { content });
+  }
+
+  async deleteMemory(id: string): Promise<{ status: string; id: string }> {
+    return this.request('DELETE', `/memory/${encodeURIComponent(id)}`);
+  }
+
+  // =========================================================================
+  // Memory Management (Settings UI)
+  // =========================================================================
+
+  // --- Auto-Profile ---
+  async getAutoProfile(): Promise<AutoProfile> {
+    return this.request<AutoProfile>('GET', '/memory/auto-profile');
+  }
+
+  async patchAutoProfile(patch: AutoProfilePatch): Promise<{ status: string; removed: string[] }> {
+    return this.request('PATCH', '/memory/auto-profile', patch);
+  }
+
+  async clearAutoProfileCategory(category: string): Promise<{ status: string }> {
+    return this.request('POST', `/memory/auto-profile/clear/${encodeURIComponent(category)}`);
+  }
+
+  // --- RAG File Management ---
+  async getRagFiles(persona?: string): Promise<RagFileInfo[]> {
+    const query = persona ? `?persona=${encodeURIComponent(persona)}` : '';
+    return this.request<RagFileInfo[]>('GET', `/memory/rag/files${query}`);
+  }
+
+  async getRagFilePath(filename: string, sourceType = 'dynamic_knowledge', persona?: string): Promise<{ path: string }> {
+    const query = new URLSearchParams({ source_type: sourceType });
+    if (persona) query.set('persona', persona);
+    return this.request<{ path: string }>('GET', `/memory/rag/files/${encodeURIComponent(filename)}/path?${query.toString()}`);
+  }
+
+  async deleteRagFile(filename: string, sourceType = 'dynamic_knowledge'): Promise<{ status: string; deleted_chunks: number }> {
+    return this.request('DELETE', `/memory/rag/files/${encodeURIComponent(filename)}?source_type=${encodeURIComponent(sourceType)}`);
+  }
+
+  async reindexRag(persona?: string): Promise<{ status: string; chunks_indexed: number }> {
+    const query = persona ? `?persona=${encodeURIComponent(persona)}` : '';
+    return this.request('POST', `/memory/rag/reindex${query}`);
+  }
+
+  async getRagStats(persona?: string): Promise<RagStats> {
+    const query = persona ? `?persona=${encodeURIComponent(persona)}` : '';
+    return this.request<RagStats>('GET', `/memory/rag/stats${query}`);
+  }
+
+  async searchRagMemories(queryText: string, sourceType?: string, limit = 20): Promise<{ memories: RagMemoryItem[]; total: number; persona: string }> {
+    return this.request('POST', '/memory/rag/search', { query: queryText, source_type: sourceType, limit });
+  }
+
+  // --- Social Graph ---
+  async getSocialGraph(): Promise<SocialGraphPlatform[]> {
+    return this.request<SocialGraphPlatform[]>('GET', '/memory/social-graph');
+  }
+
+  async upsertSocialGraphPlatform(platform: string, data: Record<string, unknown>): Promise<{ status: string }> {
+    return this.request('PUT', `/memory/social-graph/${encodeURIComponent(platform)}`, data);
+  }
+
+  async deleteSocialGraphPlatform(platform: string): Promise<{ status: string }> {
+    return this.request('DELETE', `/memory/social-graph/${encodeURIComponent(platform)}`);
+  }
+
+  async importSocialGraph(platforms: Record<string, Record<string, unknown>>): Promise<{ status: string; imported: number }> {
+    return this.request('POST', '/memory/social-graph/import', { platforms });
+  }
+
+  // --- Episodic Memory ---
+  async getEpisodes(params?: { persona?: string; min_importance?: number; min_date?: string; max_date?: string; limit?: number; offset?: number }): Promise<EpisodicMemoryEntry[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.persona) searchParams.set('persona', params.persona);
+    if (params?.min_importance) searchParams.set('min_importance', String(params.min_importance));
+    if (params?.min_date) searchParams.set('min_date', params.min_date);
+    if (params?.max_date) searchParams.set('max_date', params.max_date);
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+    const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
+    return this.request<EpisodicMemoryEntry[]>('GET', `/memory/episodes${query}`);
+  }
+
+  async deleteEpisode(id: number): Promise<{ status: string }> {
+    return this.request('DELETE', `/memory/episodes/${id}`);
+  }
+
+  async bulkDeleteEpisodes(ids: number[]): Promise<{ status: string; deleted: number }> {
+    return this.request('POST', '/memory/episodes/bulk-delete', { ids });
+  }
+
+  // Persona Memory (per-persona quests, session logs, buffer)
+  async getPersonaMemory(persona?: string): Promise<PersonaMemoryData> {
+    const query = persona ? `?persona=${encodeURIComponent(persona)}` : '';
+    return this.request<PersonaMemoryData>('GET', `/memory/persona-memory${query}`);
+  }
+
+  async patchPersonaMemory(patch: PersonaMemoryPatch, persona?: string): Promise<{ status: string }> {
+    const query = persona ? `?persona=${encodeURIComponent(persona)}` : '';
+    return this.request('PATCH', `/memory/persona-memory${query}`, patch);
+  }
+
+  async clearPersonaBuffer(persona?: string): Promise<{ status: string }> {
+    const query = persona ? `?persona=${encodeURIComponent(persona)}` : '';
+    return this.request('DELETE', `/memory/persona-memory/buffer${query}`);
   }
 
   // =========================================================================
@@ -289,11 +419,43 @@ export class AhriApiClient {
   // Agent Mode
   // =========================================================================
 
-  async executeAgentMode(goal: string, orchestratorModel = 'gemini-2.5-flash'): Promise<AgentExecution> {
+  async executeAgentMode(
+    goal: string,
+    orchestratorModel = 'gemini-3.1-flash-lite-preview',
+    options?: {
+      reasoning_level?: string;
+      enable_thinking?: boolean;
+      internet_search_enabled?: boolean;
+      images?: string[];
+      permission_mode?: string;
+      agent_session_id?: number;
+    }
+  ): Promise<AgentExecution> {
     return this.request<AgentExecution>('POST', '/agent-mode/execute', {
       goal,
-      orchestrator_model: orchestratorModel
+      orchestrator_model: orchestratorModel,
+      ...(options || {}),
     });
+  }
+
+  async approveExecution(executionId: number): Promise<AgentExecution> {
+    return this.request<AgentExecution>('POST', `/agent-mode/${executionId}/approve`);
+  }
+
+  async cancelAgentMode(executionId: number): Promise<AgentExecution> {
+    return this.request<AgentExecution>('POST', `/agent-mode/${executionId}/cancel`);
+  }
+
+  async rejectExecution(executionId: number): Promise<AgentExecution> {
+    return this.request<AgentExecution>('POST', `/agent-mode/${executionId}/reject`);
+  }
+
+  async approveWorkerTask(taskId: number): Promise<AgentWorkerTask> {
+    return this.request<AgentWorkerTask>('POST', `/agent-mode/worker/${taskId}/approve`);
+  }
+
+  async skipWorkerTask(taskId: number): Promise<AgentWorkerTask> {
+    return this.request<AgentWorkerTask>('POST', `/agent-mode/worker/${taskId}/skip`);
   }
 
   async getAgentModeStatus(executionId: number): Promise<AgentExecution> {
@@ -302,6 +464,26 @@ export class AhriApiClient {
 
   async getAgentModeWorkers(executionId: number): Promise<AgentWorkerTask[]> {
     return this.request<AgentWorkerTask[]>('GET', `/agent-mode/${executionId}/workers`);
+  }
+
+  // =========================================================================
+  // Agent Sessions
+  // =========================================================================
+
+  async getAgentSessions(): Promise<AgentSession[]> {
+    return this.request<AgentSession[]>('GET', '/agent-mode/sessions/list');
+  }
+
+  async createAgentSession(): Promise<AgentSession> {
+    return this.request<AgentSession>('POST', '/agent-mode/sessions/create');
+  }
+
+  async getAgentSession(sessionId: number): Promise<AgentSession> {
+    return this.request<AgentSession>('GET', `/agent-mode/sessions/${sessionId}`);
+  }
+
+  async deleteAgentSession(sessionId: number): Promise<void> {
+    return this.request<void>('DELETE', `/agent-mode/sessions/${sessionId}`);
   }
 
   // =========================================================================
@@ -317,27 +499,15 @@ export class AhriApiClient {
   }
 
   // =========================================================================
-  // Google OAuth
-  // =========================================================================
-
-  async getOAuthStatus(): Promise<OAuthStatus> {
-    return this.request<OAuthStatus>('GET', '/oauth/google/status');
-  }
-
-  async initiateGoogleOAuth(): Promise<{ auth_url: string; state: string }> {
-    return this.request<{ auth_url: string; state: string }>('GET', '/oauth/google/authorize');
-  }
-
-  async disconnectGoogleOAuth(): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', '/oauth/google/disconnect');
-  }
-
-  // =========================================================================
   // Models
   // =========================================================================
 
   async getAvailableModels(): Promise<AvailableModel[]> {
     return this.request<AvailableModel[]>('GET', '/settings/models/available');
+  }
+
+  async checkGoogleModels(apiKey?: string): Promise<GoogleModelCheckResponse> {
+    return this.request<GoogleModelCheckResponse>('POST', '/settings/check-google-models', { api_key: apiKey });
   }
 
   // =========================================================================
@@ -357,6 +527,50 @@ export class AhriApiClient {
   createAgentModeWebSocket(executionId: number): WebSocket {
     const wsUrl = this.baseUrl.replace(/^http/, 'ws');
     return new WebSocket(`${wsUrl}/agent-mode/ws/${executionId}`);
+  }
+
+  // =========================================================================
+  // Layer 1 — User Preferences (v3.2.0)
+  // =========================================================================
+
+  async getPreferences(): Promise<UserPreferences> {
+    return this.request<UserPreferences>('GET', '/memory/preferences');
+  }
+
+  async updatePreferences(data: Partial<UserPreferences>): Promise<UserPreferences> {
+    return this.request<UserPreferences>('PUT', '/memory/preferences', data);
+  }
+
+  // =========================================================================
+  // Layer 2 — Semantic Memory Tiers (v3.2.0)
+  // =========================================================================
+
+  async getSemanticTiers(): Promise<SemanticTiersResponse> {
+    return this.request<SemanticTiersResponse>('GET', '/memory/semantic-tiers');
+  }
+
+  async getSemanticTier(tier: MemoryTier): Promise<SemanticMemoryItem[]> {
+    return this.request<SemanticMemoryItem[]>('GET', `/memory/semantic-tiers/${tier}`);
+  }
+
+  async addSemanticFact(data: AddSemanticFactRequest): Promise<SemanticMemoryItem> {
+    return this.request<SemanticMemoryItem>('POST', '/memory/semantic-tiers', data);
+  }
+
+  async deleteSemanticFact(id: number): Promise<{ status: string; id: number }> {
+    return this.request<{ status: string; id: number }>('DELETE', `/memory/semantic-tiers/${id}`);
+  }
+
+  async deleteSemanticTier(tier: MemoryTier): Promise<{ deleted: number }> {
+    return this.request<{ deleted: number }>('DELETE', `/memory/semantic-tiers/tier/${tier}`);
+  }
+
+  async runDecayPass(): Promise<{ decayed: number }> {
+    return this.request<{ decayed: number }>('POST', '/memory/semantic-tiers/decay');
+  }
+
+  async migrateLegacy(): Promise<MigrateLegacyResponse> {
+    return this.request<MigrateLegacyResponse>('POST', '/memory/migrate-legacy');
   }
 }
 

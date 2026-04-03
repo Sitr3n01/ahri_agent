@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { useChatStore } from '@/stores/chat-store';
 
 // Fallback models (used if API doesn't return models)
+// FLASH (Gemini 2.5 Flash) é usado apenas por workers internos do agent mode.
+// Chat usa LITE como default — mais barato e rápido para conversa.
 const FALLBACK_ENGINES = [
-  { id: 'PRO', display_name: 'Gemini Pro', provider: 'google_apikey' as const, color: '#8b5cf6' },
-  { id: 'GOOGLE', display_name: 'Gemma 27B', provider: 'google_apikey' as const, color: '#3b82f6' },
+  { id: 'LITE', display_name: 'Gemini Flash Lite', provider: 'google_apikey' as const, color: '#60A5FA' },
   { id: 'DEEPSEEK', display_name: 'DeepSeek R1', provider: 'openrouter' as const, color: '#22c55e' },
   { id: 'LOCAL', display_name: 'Ollama Local', provider: 'ollama' as const, color: '#f59e0b' },
 ];

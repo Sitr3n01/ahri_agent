@@ -45,7 +45,7 @@ export function MessageBubble({ role, content, timestamp, images, isStreaming }:
 
         {/* Timestamp */}
         {timestamp && (
-          <div className="text-[10px] text-white/30 mt-1 text-right">
+          <div className="text-[10px] font-medium tracking-wide uppercase opacity-70 mt-1.5 text-right w-full mix-blend-overlay">
             {timestamp}
           </div>
         )}

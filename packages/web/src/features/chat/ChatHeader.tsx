@@ -12,7 +12,7 @@ export function ChatHeader() {
 
   const modelLabels = {
     PRO: 'Gemini Pro',
-    GOOGLE: 'Gemma 27B',
+    GOOGLE: 'Flash Lite',
     DEEPSEEK: 'DeepSeek R1',
     LOCAL: 'Local'
   };

@@ -1,6 +1,6 @@
 """
 Vision Worker - Specialized agent for image analysis and OCR.
-Uses Gemma 3 12B (multimodal variant when available) or Gemini Flash for vision tasks.
+Uses Gemini Flash with vision keys for multimodal tasks.
 
 Capabilities:
 - Image analysis and description
@@ -9,7 +9,11 @@ Capabilities:
 - Image comparison
 - Visual question answering
 """
+import asyncio
 import base64
+import json
+import logging
+import threading
 from pathlib import Path
 from typing import Any, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,16 +23,29 @@ import io
 from src.models.database import AgentWorkerTask
 from src.services.workers.base_worker import BaseWorker
 
+logger = logging.getLogger("ahri.vision_worker")
+
 
 class VisionWorker(BaseWorker):
     """Worker for vision and image analysis tasks."""
+
+    ROLE_PROMPT = (
+        "[ROLE: Visual Analysis Specialist]\n"
+        "You analyze images with precision: describe content, extract text (OCR),\n"
+        "detect objects, and answer visual questions.\n"
+        "Be specific about positions, colors, quantities, and text content.\n"
+        "For OCR: extract ALL visible text, preserving layout when possible.\n"
+        "Output: structured JSON matching the requested task_type schema."
+    )
 
     def __init__(self, llm_service):
         super().__init__(
             llm_service=llm_service,
             worker_type="Vision",
-            default_model="PRO"
+            default_model="LITE"
         )
+        self._vision_key_idx = 0
+        self._vision_key_lock = threading.Lock()
 
     async def execute(
         self,
@@ -48,18 +65,15 @@ class VisionWorker(BaseWorker):
             "detect_objects": ["person", "car"]   (for detect)
         }
         """
+        import time
+        start_time = time.time()
         task = await self._create_task_record(db, execution_id, input_data)
 
         try:
             # Load image
             image_data = await self._load_image(input_data)
             if image_data.get("error"):
-                task.output_data = image_data
-                task.status = "failed"
-                task.error = image_data["error"]
-                await db.commit()
-                await db.refresh(task)
-                return task
+                return await self._fail_task(db, task, image_data["error"], start_time)
 
             task_type = input_data.get("task_type", "describe")
 
@@ -74,18 +88,11 @@ class VisionWorker(BaseWorker):
             else:
                 raise ValueError(f"Unknown task_type: {task_type}")
 
-            task.output_data = result
-            task.status = "completed"
-            await db.commit()
-            await db.refresh(task)
-            return task
+            tokens = self._estimate_tokens(str(result))
+            return await self._complete_task(db, task, result, tokens, start_time)
 
         except Exception as e:
-            task.status = "failed"
-            task.error = str(e)
-            await db.commit()
-            await db.refresh(task)
-            return task
+            return await self._fail_task(db, task, str(e), start_time)
 
     async def _load_image(self, input_data: Dict) -> Dict[str, Any]:
         """Load and validate image."""
@@ -95,6 +102,11 @@ class VisionWorker(BaseWorker):
                 path = Path(input_data["image_path"])
                 if not path.exists():
                     return {"error": f"Image not found: {path}"}
+
+                # Validate file size (max 50MB)
+                file_size = path.stat().st_size
+                if file_size > 50 * 1024 * 1024:
+                    return {"error": f"Image too large: {file_size} bytes (max 50MB)"}
 
                 with open(path, "rb") as f:
                     image_bytes = f.read()
@@ -130,10 +142,6 @@ class VisionWorker(BaseWorker):
 
     async def _describe_image(self, image_data: Dict, db: AsyncSession) -> Dict[str, Any]:
         """Generate detailed description of image."""
-        # NOTE: Gemma 3 12B doesn't have native vision yet (as of Jan 2025)
-        # Using Gemini Flash as fallback for vision tasks
-        # When Gemma multimodal is available, switch to gemini/gemma-3-12b-it-vision
-
         prompt = """Descreva esta imagem em detalhes:
 
 1. **Cena principal**: O que está acontecendo
@@ -160,7 +168,7 @@ Forneça em JSON:
         response = await self._call_llm_with_image(
             prompt=prompt,
             image_base64=image_data["image_base64"],
-            model="PRO",
+            model="FLASH",
             schema={
                 "type": "object",
                 "properties": {
@@ -205,7 +213,7 @@ Se não houver texto, retorne has_text: false.
         response = await self._call_llm_with_image(
             prompt=prompt,
             image_base64=image_data["image_base64"],
-            model="PRO",
+            model="FLASH",
             schema={
                 "type": "object",
                 "properties": {
@@ -266,7 +274,7 @@ Retorne em JSON:
         response = await self._call_llm_with_image(
             prompt=prompt,
             image_base64=image_data["image_base64"],
-            model="gemini-2.5-flash"
+            model="FLASH"
         )
 
         return {
@@ -294,7 +302,7 @@ Forneça uma resposta detalhada e precisa em JSON:
         response = await self._call_llm_with_image(
             prompt=prompt,
             image_base64=image_data["image_base64"],
-            model="PRO",
+            model="FLASH",
             schema={
                 "type": "object",
                 "properties": {
@@ -312,25 +320,80 @@ Forneça uma resposta detalhada e precisa em JSON:
             "result": response
         }
 
+    def _get_vision_key(self) -> str:
+        """Thread-safe round-robin rotation for vision API keys."""
+        settings = self.llm.settings
+        vision_keys = settings.vision_keys
+        if not vision_keys:
+            return settings.gemini_primary_key or ""
+
+        with self._vision_key_lock:
+            key = vision_keys[self._vision_key_idx % len(vision_keys)]
+            self._vision_key_idx += 1
+            return key
+
     async def _call_llm_with_image(
         self,
         prompt: str,
         image_base64: str,
         model: str,
         schema: Dict = None
-    ) -> Dict[str, Any]:
+    ) -> Any:
         """
-        Call LLM with image input.
-        This is a placeholder - actual implementation depends on llm_service API.
-        """
-        # TODO: Implement multimodal LLM call in llm_service
-        # For now, return mock structure
-        # In real implementation, this would call:
-        # return await self.llm.generate_with_image(prompt, image_base64, model, schema)
+        Call Gemini with multimodal input (text + image) via google-genai SDK.
 
-        # Temporary: call text-only LLM with note that image analysis is pending
-        return await self._call_llm(
-            prompt=f"{prompt}\n\n[NOTE: Image analysis with base64: {image_base64[:50]}...]",
-            model=model,
-            schema=schema
-        )
+        Creates a per-call GeminiClient instance using vision key rotation.
+        Thread-safe: per-instance Client, no global state.
+        """
+        from src.core.llm_clients import GeminiClient
+        from jsonschema import validate, ValidationError
+
+        vision_key = self._get_vision_key()
+        if not vision_key:
+            raise Exception("No vision API key available for image analysis")
+
+        target_model = getattr(self.llm.settings, "google_model_vision", "gemini-2.5-flash")
+        if model.startswith("gemini-"):
+            target_model = model
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                def _generate():
+                    client = GeminiClient(api_key=vision_key, model_name=target_model)
+                    img_bytes = base64.b64decode(image_base64)
+                    img = Image.open(io.BytesIO(img_bytes))
+                    response = client.generate_content_sync(contents=[prompt, img])
+                    return response.text
+
+                loop = asyncio.get_running_loop()
+                response_text = await loop.run_in_executor(None, _generate)
+
+                if not schema:
+                    return response_text.strip()
+
+                # Parse and validate JSON
+                try:
+                    parsed = json.loads(response_text)
+                    validate(instance=parsed, schema=schema)
+                    return parsed
+                except (json.JSONDecodeError, ValidationError) as e:
+                    if attempt == max_retries - 1:
+                        try:
+                            from json_repair import repair_json
+                            repaired = repair_json(response_text)
+                            validate(instance=repaired, schema=schema)
+                            return repaired
+                        except Exception:
+                            try:
+                                return json.loads(response_text)
+                            except Exception:
+                                raise Exception(f"Vision JSON parse failed after {max_retries} retries: {e}")
+                    prompt = f"{prompt}\n\nReturn ONLY valid JSON matching the schema."
+                    continue
+
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise Exception(f"Vision LLM call failed after {max_retries} retries: {str(e)}")
+                logger.warning(f"Vision call attempt {attempt+1} failed: {e}")
+                await asyncio.sleep(1)

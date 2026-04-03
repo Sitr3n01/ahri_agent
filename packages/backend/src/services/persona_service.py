@@ -91,10 +91,12 @@ def list_personas() -> list[PersonaSummary]:
                 archetype=data.get("archetype", ""),
                 universe=data.get("universe", ""),
                 theme=PersonaTheme(
-                    primary=theme_data.get("primary", "#d8b4d8"),
-                    secondary=theme_data.get("secondary", "#e9cce9"),
-                    shadow=theme_data.get("shadow", "rgba(192, 132, 192, 0.25)"),
-                    glow=theme_data.get("glow", "rgba(216, 180, 216, 0.6)"),
+                    # Returning empty string means "no custom override" — frontend mergePersonaTheme
+                    # will fall back to the per-persona static theme instead of Ahri's defaults.
+                    primary=theme_data.get("primary", ""),
+                    secondary=theme_data.get("secondary", ""),
+                    shadow=theme_data.get("shadow", ""),
+                    glow=theme_data.get("glow", ""),
                     avatar=theme_data.get("avatar", ""),
                     background=theme_data.get("background", ""),
                     background_mobile=theme_data.get("background_mobile", ""),
@@ -138,10 +140,12 @@ def get_persona_detail(name: str) -> Optional[PersonaDetail]:
         knowledge_count=knowledge_count,
         session_count=session_count,
         theme=PersonaTheme(
-            primary=theme_data.get("primary", "#d8b4d8"),
-            secondary=theme_data.get("secondary", "#e9cce9"),
-            shadow=theme_data.get("shadow", "rgba(192, 132, 192, 0.25)"),
-            glow=theme_data.get("glow", "rgba(216, 180, 216, 0.6)"),
+            # Returning empty string means "no custom override" — frontend mergePersonaTheme
+            # will fall back to the per-persona static theme instead of Ahri's defaults.
+            primary=theme_data.get("primary", ""),
+            secondary=theme_data.get("secondary", ""),
+            shadow=theme_data.get("shadow", ""),
+            glow=theme_data.get("glow", ""),
             avatar=theme_data.get("avatar", ""),
             background=theme_data.get("background", ""),
             background_mobile=theme_data.get("background_mobile", ""),
@@ -196,10 +200,13 @@ def _write_persona_file(persona_dir: Path, data: dict, identity_text: str) -> No
         f.write(identity_text)
 
 
+import base64
+
 def update_persona(name: str, update_data: UpdatePersonaRequest) -> Optional[PersonaDetail]:
     """Updates persona attributes and identity."""
     settings = get_settings()
-    persona_dir = settings.personas_dir / name.lower().replace(" ", "_")
+    persona_slug = name.lower().replace(" ", "_")
+    persona_dir = settings.personas_dir / persona_slug
 
     if not persona_dir.exists():
         return None
@@ -210,6 +217,35 @@ def update_persona(name: str, update_data: UpdatePersonaRequest) -> Optional[Per
     if not isinstance(theme, dict):
         theme = {}
     
+    # Handle Image Uploads (Base64)
+    for img_field, theme_key in [("avatar_base64", "avatar"), ("background_base64", "background")]:
+        b64_data = getattr(update_data, img_field)
+        if b64_data:
+            try:
+                # Basic parsing of data:image/xxx;base64,yyy
+                if "," in b64_data:
+                    header, encoded = b64_data.split(",", 1)
+                else:
+                    header, encoded = None, b64_data
+                
+                img_bytes = base64.b64decode(encoded)
+                
+                # Determine extension
+                ext = "png"
+                if header:
+                    if "image/jpeg" in header: ext = "jpg"
+                    elif "image/webp" in header: ext = "webp"
+                
+                filename = f"{theme_key}.{ext}"
+                file_path = persona_dir / filename
+                file_path.write_bytes(img_bytes)
+                
+                # Update theme path (relative to static root /data)
+                theme[theme_key] = f"data/personas/{persona_slug}/{filename}"
+                logger.info(f"Saved {theme_key} for persona '{name}' at {file_path}")
+            except Exception as e:
+                logger.error(f"Failed to process {img_field} for persona '{name}': {e}")
+
     # Merge updates
     new_data = existing_data.copy()
     

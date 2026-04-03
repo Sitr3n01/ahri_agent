@@ -7,3 +7,4 @@ export * from './types/agent-mode.js';
 export * from './types/memory.js';
 export * from './types/llm.js';
 export * from './api-client/index.js';
+export * from './types/engine.js';

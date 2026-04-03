@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(Path(__file__).resolve().parent.parent.parent.parent / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     gemini_api_key_free: str = ""
     openrouter_api_key: str = ""
     openrouter_model_name: str = "deepseek/deepseek-r1:free"
+    google_model_pro: str = "gemini-2.0-pro-exp-02-05"
+    google_model_flash: str = "gemini-2.5-flash"
+    google_model_lite: str = "gemini-3.1-flash-lite-preview"
+    google_model_vision: str = "gemini-2.5-flash"
+    google_model_search: str = "gemini-3.1-flash-lite-preview"
+    google_model_memory: str = "gemini-3.1-flash-lite-preview"
+    ollama_chat_model: str = "gpt-oss:20b"
 
     # --- Search ---
     cse_api_key: str = ""
@@ -56,19 +63,39 @@ class Settings(BaseSettings):
     gh_token: str = ""
     gist_id: str = ""
 
-    # --- Google OAuth ---
-    google_oauth_client_id: str = ""
-    google_oauth_client_secret: str = ""
-
     # --- Agent Mode ---
     agent_mode_enabled: bool = True
-    agent_mode_orchestrator: str = "gemini-2.5-pro-preview-06-05"  # PRO for planning
-    agent_mode_default_workers: str = "gemini-2.5-flash,gemma-3-27b-it"  # Flash primary, Gemma backup
-    agent_mode_use_oauth: bool = True  # Prefer OAuth credentials for agent mode
-    google_ai_studio_api_key: str = ""  # For Gemma 3 workers (free tier)
-    google_ai_studio_tpm_limit: int = 15000
-    deepinfra_api_key: str = ""  # Fallback for Gemma 3
+    agent_mode_orchestrator: str = "gemini-3.1-flash-lite-preview"  # Lite for planning
+    google_ai_studio_api_key: str = ""  # Additional API key (free tier, used as 6th agent key)
+    deepinfra_api_key: str = ""  # DeepInfra backup key
     ollama_base_url: str = "http://localhost:11434"  # Local self-hosted option
+
+    # --- Agent Mode v2 (Qwen + Flash Lite) ---
+    agent_mode_rpm_limit: int = 15          # requests/min per API key (Gemini Flash Lite free tier)
+    agent_mode_tpm_limit: int = 250000      # 250k TPM context (Gemini Flash Lite)
+    agent_mode_max_parallel: int = 10       # max simultaneous workers
+    agent_mode_local_model: str = "qwen3:8b"  # Ollama local model
+    agent_mode_api_model: str = "gemini-3.1-flash-lite-preview"  # API model for agents
+
+    # --- Compaction ---
+    compaction_threshold: int = 30       # Compact when history > N messages
+    compaction_recent_window: int = 15   # Keep last N messages uncompacted
+
+    # --- Agent Mode API Keys (round-robin, up to 6 keys × 15 RPM = 90 RPM total) ---
+    agent_api_key_1: str = ""
+    agent_api_key_2: str = ""
+    agent_api_key_3: str = ""
+    agent_api_key_4: str = ""
+    agent_api_key_5: str = ""
+
+    @property
+    def agent_api_keys(self) -> list[str]:
+        """Returns list of non-empty agent API keys for round-robin rotation."""
+        return [k for k in [
+            self.agent_api_key_1, self.agent_api_key_2, self.agent_api_key_3,
+            self.agent_api_key_4, self.agent_api_key_5,
+            self.google_ai_studio_api_key,
+        ] if k]
 
     @property
     def root_dir(self) -> Path:
@@ -90,20 +117,26 @@ class Settings(BaseSettings):
     @property
     def db_path(self) -> Path:
         if self.database_url:
-            # Extrai o path do sqlite:///...
-            return Path(self.database_url.replace("sqlite:///", ""))
-        return self.data_dir / "db" / "ahri.db"
+            # Extrai o path do sqlite:///... ou sqlite+aiosqlite:///...
+            path_str = self.database_url.split(":///")[-1] if ":///" in self.database_url else self.database_url
+            path = Path(path_str)
+            if not path.is_absolute():
+                return (self.data_dir / "db" / path).resolve()
+            return path.resolve()
+        return (self.data_dir / "db" / "ahri.db").resolve()
 
     @property
     def vector_db_path(self) -> Path:
         if self.chroma_path:
-            return Path(self.chroma_path)
-        return self.data_dir / "vector_db"
+            return Path(self.chroma_path).resolve()
+        return (self.data_dir / "vector_db").resolve()
 
     @property
     def sqlite_url(self) -> str:
         if self.database_url:
-            return self.database_url
+            # Mantém o prefixo se existir (ex: sqlite+aiosqlite:///)
+            prefix = self.database_url.split(":///")[0] + ":///" if ":///" in self.database_url else "sqlite+aiosqlite:///"
+            return f"{prefix}{self.db_path}"
         return f"sqlite+aiosqlite:///{self.db_path}"
 
     @property
@@ -127,6 +160,27 @@ class Settings(BaseSettings):
     def vision_keys(self) -> list[str]:
         keys = [k for k in [self.google_api_key_vision_a, self.google_api_key_vision_b] if k]
         return keys or [self.gemini_fallback_key]
+
+    # ── Engine V4 ──
+    engine_v2_enabled: bool = True            # Feature flag: True = use V4 engine
+    engine_default_model: str = "fast"         # Alias: "fast", "best", "local", or model ID
+    engine_max_iterations: int = 50            # Max tool-use loops per execution
+    engine_compact_threshold: float = 0.80     # Compact at 80% context window
+    engine_compact_keep_recent: int = 4        # Keep last N messages after compaction
+    engine_permission_mode: str = "auto"       # "auto" | "ask" | "trust"
+    engine_plugin_dirs: str = ""               # Comma-separated plugin directories
+    engine_enable_subagents: bool = True       # Allow sub-agent spawning
+    engine_max_subagent_depth: int = 3         # Max nesting depth
+    engine_coordinator_mode: str = "single"    # "single" | "multi" | "swarm"
+    engine_hook_timeout: int = 30              # Hook execution timeout (seconds)
+    engine_stream_enabled: bool = True         # Stream events via WebSocket
+
+    @property
+    def engine_plugin_directories(self) -> list[str]:
+        """Parse comma-separated plugin dirs into list."""
+        if not self.engine_plugin_dirs:
+            return []
+        return [d.strip() for d in self.engine_plugin_dirs.split(",") if d.strip()]
 
 
 @lru_cache

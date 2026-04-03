@@ -34,7 +34,7 @@ class SessionService:
             )
             .outerjoin(ChatMessage, ChatSession.id == ChatMessage.session_id)
             .where(ChatSession.persona_name == persona_name.lower())
-            .group_by(ChatSession.id)
+            .group_by(ChatSession.id, ChatSession.updated_at)
             .order_by(ChatSession.updated_at.desc())
         )
 
@@ -168,6 +168,24 @@ class SessionService:
         session.title = title
         await self.db.commit()
         return True
+
+    async def get_session_summary(self, session_id: int) -> str:
+        """Retorna o compacted_summary de uma sessão."""
+        result = await self.db.execute(
+            select(ChatSession.compacted_summary).where(ChatSession.id == session_id)
+        )
+        return result.scalar() or ""
+
+    async def update_session_summary(self, session_id: int, summary: str, compacted_up_to: int) -> None:
+        """Atualiza o summary de compactação da sessão."""
+        result = await self.db.execute(
+            select(ChatSession).where(ChatSession.id == session_id)
+        )
+        session = result.scalar_one_or_none()
+        if session:
+            session.compacted_summary = summary
+            session.compacted_up_to = compacted_up_to
+            await self.db.commit()
 
     async def delete_session(self, session_id: int) -> bool:
         """Deleta uma sessao e suas mensagens."""

@@ -1,14 +1,15 @@
 """
 LLM Clients - Abstraçao unificada dos backends LLM.
-Corrige o bug de genai.configure() global (thread-unsafe).
+Usa google-genai SDK (per-instance Client, thread-safe nativo).
 """
 import json
 import logging
 import time
-from typing import AsyncGenerator, Optional
+from typing import Optional
 
 import requests
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from openai import OpenAI
 
 from src.config import get_settings
@@ -17,79 +18,200 @@ logger = logging.getLogger("ahri.llm")
 
 
 class GeminiClient:
-    """Cliente Gemini que suporta API key OU OAuth credentials.
-    Cria instancias por request para thread-safety."""
+    """Cliente Gemini via google-genai SDK.
 
-    def __init__(self, api_key: str = "", model_name: str = "", credentials=None):
+    Cada instância cria seu próprio genai.Client(api_key=...).
+    Thread-safe por design — sem estado global compartilhado.
+    """
+
+    def __init__(self, api_key: str = "", model_name: str = ""):
         self.api_key = api_key
-        self.credentials = credentials
         self._masked_key = f"{api_key[:8]}...{api_key[-4:]}" if api_key and len(api_key) > 12 else "***"
-        self.model_name = model_name
 
-    def _configure(self):
-        """Configura genai com credentials ou API key."""
-        if self.credentials:
-            # Auto-refresh se expirado
-            if self.credentials.expired and self.credentials.refresh_token:
-                import google.auth.transport.requests
-                self.credentials.refresh(google.auth.transport.requests.Request())
-            genai.configure(credentials=self.credentials)
+        # Garante que o nome do modelo tenha o prefixo 'models/' se necessário
+        if model_name and not model_name.startswith("models/") and "/" not in model_name:
+            self.model_name = f"models/{model_name}"
         else:
-            genai.configure(api_key=self.api_key)
+            self.model_name = model_name
 
-    def create_model(self, system_instruction: Optional[str] = None) -> genai.GenerativeModel:
-        """Cria um GenerativeModel com API key ou OAuth credentials."""
-        self._configure()
+        logger.debug(f"GeminiClient init: model={self.model_name!r}, key={self._masked_key}")
+
+        self._client = genai.Client(api_key=api_key) if api_key else None
+
+    def _build_thinking_config(self, reasoning_level: str = "medium") -> Optional[types.ThinkingConfig]:
+        """Constrói ThinkingConfig baseado no modelo e nível de raciocínio.
+
+        - Gemini 3.x: usa thinking_level (string: low/medium/high)
+        - Gemini 2.5: usa thinking_budget (int: 1024/8192/24576)
+        """
+        if not reasoning_level or reasoning_level == "off":
+            return None
+
+        model_lower = self.model_name.lower()
+        is_3x = any(v in model_lower for v in ["3.1", "3.0", "3-flash", "3-pro"])
+
+        if is_3x:
+            return types.ThinkingConfig(thinking_level=reasoning_level)
+        else:
+            budget_map = {"low": 1024, "medium": 8192, "high": 24576}
+            budget = budget_map.get(reasoning_level, 8192)
+            return types.ThinkingConfig(thinking_budget=budget)
+
+    def create_chat_and_send_stream(
+        self,
+        system_instruction: str,
+        history: list[dict],
+        message: str,
+        reasoning_level: str = "medium",
+    ):
+        """Cria chat com histórico e envia mensagem em streaming.
+
+        Retorna iterator de chunks. Substitui create_chat() + send_message(stream=True).
+        """
+        if not self._client:
+            raise RuntimeError("GeminiClient has no API key configured")
 
         is_gemma = "gemma" in self.model_name.lower()
         sys_inst = None if is_gemma else system_instruction
+        thinking = self._build_thinking_config(reasoning_level) if not is_gemma else None
 
-        return genai.GenerativeModel(
-            self.model_name,
+        config = types.GenerateContentConfig(
             system_instruction=sys_inst,
+            thinking_config=thinking,
         )
 
-    def create_chat(self, system_instruction: str, history: list[dict] = None):
-        """Cria uma sessao de chat com historico opcional."""
-        model = self.create_model(system_instruction)
-
-        is_gemma = "gemma" in self.model_name.lower()
+        # Build history no formato do novo SDK
         g_history = []
-
         if is_gemma:
-            g_history.append({"role": "user", "parts": [f"SYSTEM INSTRUCTIONS:\n{system_instruction}"]})
-            g_history.append({"role": "model", "parts": ["Entendido."]})
+            g_history.append(types.Content(
+                role="user",
+                parts=[types.Part(text=f"SYSTEM INSTRUCTIONS:\n{system_instruction}")]
+            ))
+            g_history.append(types.Content(
+                role="model",
+                parts=[types.Part(text="Entendido.")]
+            ))
 
         if history:
             for msg in history:
                 role = "user" if msg.get("role") == "user" else "model"
                 content = str(msg.get("content", "."))
-                g_history.append({"role": role, "parts": [content]})
+                g_history.append(types.Content(
+                    role=role,
+                    parts=[types.Part(text=content)]
+                ))
 
-        return model.start_chat(history=g_history)
+        chat = self._client.chats.create(
+            model=self.model_name,
+            config=config,
+            history=g_history,
+        )
 
-    def generate_content_rest(self, prompt: str, temperature: float = 0.2) -> Optional[str]:
-        """Gera conteudo via REST API (sem usar SDK global). Thread-safe."""
+        try:
+            stream = chat.send_message_stream(message)
+            for chunk in stream:
+                if chunk.text:
+                    yield chunk.text
+        except Exception as e:
+            logger.error(f"Gemini Streaming Error ({self.model_name}): {str(e)}")
+            if "404" in str(e):
+                yield f"[Gemini Error] Modelo '{self.model_name}' não encontrado (404). Verifique o nome exato no painel de Configurações > Teste de Modelos."
+            else:
+                yield f"[Gemini Error] {str(e)}"
+
+    def generate_content_stream(
+        self,
+        contents,
+        system_instruction: Optional[str] = None,
+        reasoning_level: str = "medium",
+    ):
+        """Gera conteúdo em streaming (para multimodal: text + images + files).
+
+        Substitui create_model() + model.generate_content(stream=True).
+        """
+        if not self._client:
+            raise RuntimeError("GeminiClient has no API key configured")
+
+        is_gemma = "gemma" in self.model_name.lower()
+        thinking = self._build_thinking_config(reasoning_level) if not is_gemma else None
+
+        config = types.GenerateContentConfig(
+            system_instruction=None if is_gemma else system_instruction,
+            thinking_config=thinking,
+        )
+
+        try:
+            stream = self._client.models.generate_content_stream(
+                model=self.model_name,
+                contents=contents,
+                config=config,
+            )
+            for chunk in stream:
+                if chunk.text:
+                    yield chunk.text
+        except Exception as e:
+            logger.error(f"Gemini Multi-modal Error: {str(e)}")
+            yield f"[Gemini Error] {str(e)}"
+
+    def generate_content_sync(self, contents, system_instruction: Optional[str] = None):
+        """Gera conteúdo não-streaming (para vision worker, agent pre-pass).
+
+        Substitui create_model() + model.generate_content() (sem stream).
+        """
+        if not self._client:
+            raise RuntimeError("GeminiClient has no API key configured")
+
+        is_gemma = "gemma" in self.model_name.lower()
+        config = types.GenerateContentConfig(
+            system_instruction=None if is_gemma else system_instruction,
+        )
+
+        return self._client.models.generate_content(
+            model=self.model_name,
+            contents=contents,
+            config=config,
+        )
+
+    def upload_file(self, path: str, mime_type: str):
+        """Upload file via Gemini File API (novo SDK)."""
+        if not self._client:
+            raise RuntimeError("GeminiClient has no API key configured")
+        return self._client.files.upload(file=path, config={"mime_type": mime_type})
+
+    def get_file(self, name: str):
+        """Consulta status de arquivo via Gemini File API."""
+        if not self._client:
+            raise RuntimeError("GeminiClient has no API key configured")
+        return self._client.files.get(name=name)
+
+    def generate_content_rest(
+        self, prompt: str, temperature: float = 0.2, thinking_budget: int = 0
+    ) -> Optional[str]:
+        """Gera conteudo via REST API direta (HTTP puro, sem SDK).
+
+        Thread-safe. Usado por agent workers, memory_analyzer, compaction_service.
+
+        Args:
+            prompt: Input text prompt
+            temperature: Generation temperature (default: 0.2)
+            thinking_budget: Gemini thinking budget in tokens (0=off, 1024=low, 8192=medium, 24576=high)
+        """
         full_model = self.model_name if self.model_name.startswith("models/") else f"models/{self.model_name}"
         base_url = f"https://generativelanguage.googleapis.com/v1beta/{full_model}:generateContent"
 
-        payload = {
+        payload: dict = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": temperature},
         }
 
-        headers = {"Content-Type": "application/json"}
+        # Add thinking config for Gemini models that support it
+        if thinking_budget > 0:
+            payload["generationConfig"]["thinkingConfig"] = {
+                "thinkingBudget": thinking_budget
+            }
 
-        if self.credentials:
-            # OAuth: usa Bearer token
-            if self.credentials.expired and self.credentials.refresh_token:
-                import google.auth.transport.requests
-                self.credentials.refresh(google.auth.transport.requests.Request())
-            headers["Authorization"] = f"Bearer {self.credentials.token}"
-            url = base_url
-        else:
-            # API key: query param
-            url = f"{base_url}?key={self.api_key}"
+        headers = {"Content-Type": "application/json"}
+        url = f"{base_url}?key={self.api_key}"
 
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=30)
@@ -132,7 +254,7 @@ class OllamaClient:
         self.model_name = model_name
         self.api_url = api_url
 
-    def stream_chat(self, messages: list[dict], ctx_size: int = 4096):
+    def stream_chat(self, messages: list[dict], ctx_size: int = 4096, think: bool = False):
         """Gera resposta em streaming via Ollama."""
         payload = {
             "model": self.model_name,
@@ -143,6 +265,7 @@ class OllamaClient:
                 "num_ctx": ctx_size,
                 "num_gpu": 999,
                 "num_thread": 6,
+                "think": think,
             },
         }
 
@@ -171,3 +294,49 @@ class OllamaClient:
             yield "\n[TIMEOUT] Model took too long to respond."
         except Exception as e:
             yield f"\n[OLLAMA ERROR] {e}"
+
+    def generate_sync(self, messages: list[dict], ctx_size: int = 4096, think: bool = False) -> str:
+        """Gera resposta completa (não-streaming) via Ollama.
+
+        Usado por agent workers que precisam do texto completo
+        para validar JSON e aplicar retry logic.
+
+        Args:
+            messages: Lista de mensagens [{role, content}]
+            ctx_size: Tamanho do contexto (default: 4096)
+            think: Enable thinking/reasoning mode (default: False)
+
+        Returns:
+            Texto completo da resposta
+        """
+        options: dict = {
+            "temperature": 0.7,
+            "num_ctx": ctx_size,
+            "num_gpu": 999,
+            "num_thread": 6,
+        }
+        if think:
+            options["think"] = True
+
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": False,
+            "options": options,
+        }
+
+        logger.info(f"[OLLAMA] generate_sync to {self.model_name}...")
+        start = time.time()
+
+        try:
+            response = requests.post(self.api_url, json=payload, timeout=600)
+            response.raise_for_status()
+            data = response.json()
+            content = data.get("message", {}).get("content", "")
+            logger.info(f"[OLLAMA] generate_sync completed in {time.time() - start:.2f}s ({len(content)} chars)")
+            return content
+        except requests.exceptions.Timeout:
+            return "[TIMEOUT] Model took too long to respond."
+        except Exception as e:
+            logger.error(f"[OLLAMA] generate_sync error: {e}")
+            return f"[OLLAMA ERROR] {e}"

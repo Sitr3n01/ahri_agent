@@ -42,9 +42,15 @@ export function useAgentModeWebSocket(
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const shouldReconnect = useRef(true);
+  const executionStatusRef = useRef<string | null>(null);
+
+  // Keep ref in sync with execution status (avoids stale closure in onclose)
+  useEffect(() => {
+    executionStatusRef.current = execution?.status ?? null;
+  }, [execution?.status]);
 
   const connect = useCallback(() => {
-    if (!executionId || !enabled) return;
+    if (!executionId || !enabled || !shouldReconnect.current) return;
 
     // Clear existing connection
     if (wsRef.current) {
@@ -74,13 +80,17 @@ export function useAgentModeWebSocket(
         const message: WebSocketMessage = JSON.parse(event.data);
         console.log('[AgentMode WebSocket] Message:', message.type, message);
 
+        if (!message.data && message.type !== 'connected' && message.type !== 'error') {
+          console.warn('[AgentMode WebSocket] Missing data in message:', message.type);
+          return;
+        }
+
         switch (message.type) {
           case 'connected':
             console.log('[AgentMode WebSocket] Initial connection confirmed');
             break;
 
           case 'status_update':
-            // Update execution status and plan
             setExecution(prev => prev ? {
               ...prev,
               status: message.data.status,
@@ -89,7 +99,6 @@ export function useAgentModeWebSocket(
             break;
 
           case 'worker_started':
-            // Add new worker task
             setWorkerTasks(prev => {
               const updated = new Map(prev);
               updated.set(message.data.task_id, {
@@ -104,14 +113,15 @@ export function useAgentModeWebSocket(
                 status: 'running',
                 error: '',
                 created_at: message.data.created_at,
-                completed_at: null
+                completed_at: null,
+                retry_count: 0,
+                reflexion_notes: []
               });
               return updated;
             });
             break;
 
           case 'worker_completed':
-            // Update worker task with completion data
             setWorkerTasks(prev => {
               const updated = new Map(prev);
               const existing = updated.get(message.data.task_id);
@@ -131,7 +141,6 @@ export function useAgentModeWebSocket(
             break;
 
           case 'execution_completed':
-            // Final execution result
             setExecution(prev => prev ? {
               ...prev,
               status: message.data.status,
@@ -146,7 +155,6 @@ export function useAgentModeWebSocket(
             break;
 
           case 'tpm_status':
-            // Update TPM quota status
             setTpmStatus(message.data);
             break;
 
@@ -173,17 +181,20 @@ export function useAgentModeWebSocket(
       console.log('[AgentMode WebSocket] Disconnected:', event.code, event.reason);
       setIsConnected(false);
 
-      // Auto-reconnect if execution is still pending/running
-      if (shouldReconnect.current && execution?.status && ['planning', 'running'].includes(execution.status)) {
+      // Use ref to avoid stale closure — reads current status without being a dependency
+      const status = executionStatusRef.current;
+      if (shouldReconnect.current && status && ['planning', 'running'].includes(status)) {
         console.log('[AgentMode WebSocket] Reconnecting in 2s...');
         reconnectTimeoutRef.current = setTimeout(() => {
-          connect();
+          if (shouldReconnect.current) {
+            connect();
+          }
         }, 2000);
       }
     };
 
     wsRef.current = ws;
-  }, [executionId, enabled, execution?.status]);
+  }, [executionId, enabled]);
 
   // Auto-connect when execution ID changes
   useEffect(() => {

@@ -31,6 +31,8 @@ export function LoginView() {
 
   useEffect(() => {
     let cancelled = false;
+    let intervalId: any;
+
     const checkBackend = async () => {
       try {
         await api.health();
@@ -39,8 +41,16 @@ export function LoginView() {
         if (!cancelled) setBackendStatus('failed');
       }
     };
+
     checkBackend();
-    return () => { cancelled = true; };
+    
+    // Poll every 3 seconds to auto-reconnect if it fails
+    intervalId = setInterval(checkBackend, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

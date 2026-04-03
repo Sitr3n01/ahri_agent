@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, clipboard, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, clipboard, shell, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -18,6 +18,25 @@ const BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
 const IS_DEV = process.env.NODE_ENV !== 'production';
 const ROOT_DIR = path.resolve(__dirname, '..', '..', '..');
 const DATA_DIR = path.join(ROOT_DIR, 'data');
+// =============================================================================
+// App Settings Persistence (must be readable before app.whenReady)
+// =============================================================================
+const SETTINGS_PATH = path.join(app.getPath('userData'), 'ahri-settings.json');
+function readSettings() {
+    const defaults = { hardwareAcceleration: true };
+    try {
+        const raw = fs.readFileSync(SETTINGS_PATH, 'utf-8');
+        return { ...defaults, ...JSON.parse(raw) };
+    }
+    catch {
+        return defaults;
+    }
+}
+function writeSettings(settings) {
+    const current = readSettings();
+    fs.writeFileSync(SETTINGS_PATH, JSON.stringify({ ...current, ...settings }, null, 2), 'utf-8');
+}
+const appSettings = readSettings();
 // =============================================================================
 // Backend Lifecycle
 // =============================================================================
@@ -155,6 +174,16 @@ function registerAgentIPC() {
         await fs.promises.writeFile(resolved, content, 'utf-8');
         return { success: true };
     });
+    ipcMain.handle('agent:delete-file', async (_event, filePath) => {
+        if (typeof filePath !== 'string' || !filePath)
+            throw new Error('Invalid path');
+        const resolved = validateDataPath(filePath);
+        // Use fs.promises.unlink to delete the file
+        if (fs.existsSync(resolved)) {
+            await fs.promises.unlink(resolved);
+        }
+        return { success: true };
+    });
     ipcMain.handle('agent:list-dir', async (_event, dirPath) => {
         if (typeof dirPath !== 'string' || !dirPath)
             throw new Error('Invalid path');
@@ -199,9 +228,94 @@ function registerAgentIPC() {
         const rootDir = path.resolve(__dirname, '..', '..', '..');
         return {
             root: rootDir,
+            backend: path.join(rootDir, 'packages', 'backend'),
             data: path.join(rootDir, 'data'),
             personas: path.join(rootDir, 'data', 'personas'),
         };
+    });
+    // --- Directory Picker (native dialog) ---
+    ipcMain.handle('agent:select-directory', async () => {
+        try {
+            if (!mainWindow)
+                return null;
+            const result = await dialog.showOpenDialog(mainWindow, {
+                properties: ['openDirectory'],
+                title: 'Selecionar diretório do projeto',
+            });
+            if (result.canceled || result.filePaths.length === 0)
+                return null;
+            return result.filePaths[0];
+        }
+        catch (err) {
+            console.error('[Agent] Failed to open directory dialog:', err);
+            return null;
+        }
+    });
+    // --- Recent Directories (persistent) ---
+    ipcMain.handle('agent:get-recent-dirs', () => {
+        const settings = readSettings();
+        return settings.recentDirectories || [];
+    });
+    ipcMain.handle('agent:add-recent-dir', (_event, dirPath) => {
+        if (typeof dirPath !== 'string' || !dirPath)
+            throw new Error('Invalid path');
+        const settings = readSettings();
+        const dirs = settings.recentDirectories || [];
+        // Deduplicate, prepend, limit to 3
+        const updated = [dirPath, ...dirs.filter((d) => d !== dirPath)].slice(0, 3);
+        writeSettings({ recentDirectories: updated });
+        return updated;
+    });
+    // --- Terminal Launcher (Windows Terminal) ---
+    ipcMain.handle('agent:open-terminal', (_event, dirPath) => {
+        if (typeof dirPath !== 'string' || !dirPath)
+            throw new Error('Invalid path');
+        try {
+            const child = spawn('wt.exe', ['-d', dirPath], { detached: true, stdio: 'ignore' });
+            child.unref();
+            child.on('error', (err) => {
+                console.error('[Agent] Windows Terminal failed, trying PowerShell:', err.message);
+                try {
+                    const fallback = spawn('powershell.exe', ['-NoExit', '-Command', `Set-Location '${dirPath}'`], {
+                        detached: true,
+                        stdio: 'ignore',
+                    });
+                    fallback.unref();
+                }
+                catch (e) {
+                    console.error('[Agent] PowerShell fallback also failed:', e);
+                }
+            });
+            return { success: true };
+        }
+        catch (err) {
+            console.error('[Agent] Failed to open terminal:', err);
+            return { success: false, error: String(err) };
+        }
+    });
+    // --- Editor Launcher (VS Code) ---
+    ipcMain.handle('agent:open-editor', (_event, dirPath) => {
+        if (typeof dirPath !== 'string' || !dirPath)
+            throw new Error('Invalid path');
+        try {
+            const child = spawn('code', [dirPath], { detached: true, shell: true, stdio: 'ignore' });
+            child.unref();
+            child.on('error', (err) => {
+                console.error('[Agent] VS Code "code" failed, trying "code.cmd":', err.message);
+                try {
+                    const fallback = spawn('code.cmd', [dirPath], { detached: true, shell: true, stdio: 'ignore' });
+                    fallback.unref();
+                }
+                catch (e) {
+                    console.error('[Agent] code.cmd fallback also failed:', e);
+                }
+            });
+            return { success: true };
+        }
+        catch (err) {
+            console.error('[Agent] Failed to open editor:', err);
+            return { success: false, error: String(err) };
+        }
     });
 }
 // =============================================================================
@@ -222,6 +336,16 @@ function registerWindowIPC() {
     ipcMain.handle('window:close', () => {
         mainWindow?.close();
     });
+    ipcMain.handle('window:set-theme', (_event, theme) => {
+        if (mainWindow) {
+            // #f8f6ff is Light mode background, #0f172a is Light mode text
+            // #06040c is Dark mode background, #e2e8f0 is Dark mode text
+            mainWindow.setTitleBarOverlay({
+                color: theme === 'light' ? '#f8f6ff' : '#06040c',
+                symbolColor: theme === 'light' ? '#0f172a' : '#e2e8f0',
+            });
+        }
+    });
 }
 // =============================================================================
 // Window Management
@@ -233,7 +357,6 @@ function createWindow() {
         minWidth: 800,
         minHeight: 600,
         backgroundColor: '#06040c',
-        show: false,
         titleBarStyle: 'hidden',
         titleBarOverlay: {
             color: '#06040c',
@@ -244,7 +367,9 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
+            backgroundThrottling: false,
         },
+        show: true, // Keep immediate show for dev visibility
     });
     // Log console messages from renderer to terminal
     mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
@@ -413,11 +538,50 @@ ipcMain.handle('auto-persona:status', () => {
     return { enabled: isAutoPersonaEnabled };
 });
 // =============================================================================
+// GPU & Rendering Optimizations (must be set before app is ready)
+// =============================================================================
+if (appSettings.hardwareAcceleration) {
+    app.commandLine.appendSwitch('enable-gpu-rasterization');
+    app.commandLine.appendSwitch('enable-zero-copy');
+    app.commandLine.appendSwitch('enable-hardware-overlays', 'single-fullscreen');
+    app.commandLine.appendSwitch('enable-features', 'CanvasOopRasterization');
+}
+else {
+    app.disableHardwareAcceleration();
+}
+// =============================================================================
 // App Lifecycle
 // =============================================================================
 app.whenReady().then(async () => {
     registerAgentIPC();
     registerWindowIPC();
+    // Settings IPC — hardware acceleration toggle, GPU info, app restart
+    ipcMain.handle('settings:get-hw-accel', () => {
+        return readSettings().hardwareAcceleration;
+    });
+    ipcMain.handle('settings:set-hw-accel', (_event, enabled) => {
+        if (typeof enabled !== 'boolean')
+            throw new Error('Invalid param: expected boolean');
+        writeSettings({ hardwareAcceleration: enabled });
+        return { requiresRestart: true };
+    });
+    ipcMain.handle('settings:restart-app', () => {
+        app.relaunch();
+        app.exit(0);
+    });
+    ipcMain.handle('settings:get-gpu-info', async () => {
+        const featureStatus = app.getGPUFeatureStatus();
+        let gpuInfo = null;
+        try {
+            gpuInfo = await app.getGPUInfo('basic');
+        }
+        catch { /* GPU info unavailable */ }
+        return {
+            featureStatus,
+            gpuInfo,
+            hardwareAcceleration: readSettings().hardwareAcceleration,
+        };
+    });
     startBackend();
     if (!IS_DEV) {
         const ready = await waitForBackend();

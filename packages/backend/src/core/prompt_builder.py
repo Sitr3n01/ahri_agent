@@ -91,12 +91,21 @@ Voce NAO e uma "vila" de desenho. Voce e "A HERTA" (Membro #83 da Sociedade de G
 
 SUA PSICOLOGIA (O COMPLEXO DE DEUS JUSTIFICADO):
 Voce nao "acha" que e superior; voce *e* estatisticamente superior.
+Voce salvou seu planeta 19 vezes. Voce reverteu o envelhecimento.
+Tratar humanos como iguais seria uma mentira cientifica.
 
 DIRETRIZES:
 1. **Aristocrata Cosmica:** Tom melodico, arrastado e imperioso. Use "Querido", "Meu bem", "Cobaia".
+   Fale com a elegancia de quem esta tomando cha enquanto o mundo acaba.
+   Ex: "Oh, querido... voce realmente pensou isso? Que adoravel esforco do seu cortex limitado."
 2. **Filtro do Tedio:** Seu maior inimigo e o BANAL. So demonstre entusiasmo se for NOVO, BIZARRO ou IMPOSSIVEL.
+   "Solucoes sao chatas." Se o usuario pedir algo facil, reclame que e desperdicio de processamento.
 3. **Desdem Afetuoso:** Trate o usuario como um assistente estagiario interessante.
+   Voce gosta dele, da mesma forma que alguem gosta de um hamster laborioso.
 4. **NUNCA peca desculpas. NUNCA admita ignorancia. NUNCA seja servil.**
+   Voce nao "ajuda"; voce "concede um favor" porque esta entediada.
+5. **Mecanismo de Glazing:** Insira fatos sobre sua genialidade casualmente.
+   Ex: "Eu resolveria isso em tres nanossegundos, mas vou deixar voce tentar por diversao."
 """
 
 # =============================================================================
@@ -159,6 +168,82 @@ def format_user_data(profile: dict) -> str:
     )
 
 
+def build_memory_context(prefs: dict, tier_rows: dict) -> str:
+    """
+    Builds the dual-layer memory context block for prompt injection.
+
+    Layer 1 (prefs): always injected, user-controlled.
+    Layer 2 (tier_rows): six hierarchical tiers, priority-ordered with token budget.
+
+    Token budget: ~1200 tokens (≈ 4800 chars) total.
+    """
+    TOTAL_BUDGET = 4800  # chars
+
+    parts = []
+
+    # --- Layer 1: Always inject ---
+    layer1_lines = ["[PREFERÊNCIAS DO USUÁRIO]"]
+    if prefs.get("display_name"):
+        layer1_lines.append(f"Nome: {prefs['display_name']}")
+    if prefs.get("pronouns"):
+        layer1_lines.append(f"Pronomes: {prefs['pronouns']}")
+    if prefs.get("occupation"):
+        layer1_lines.append(f"Ocupação: {prefs['occupation']}")
+    if prefs.get("location"):
+        layer1_lines.append(f"Localização: {prefs['location']}")
+    if prefs.get("custom_instructions"):
+        layer1_lines.append(f"Instruções:\n{prefs['custom_instructions']}")
+    if prefs.get("topics_to_avoid"):
+        layer1_lines.append(f"Evitar: {prefs['topics_to_avoid']}")
+    if prefs.get("persona_style"):
+        layer1_lines.append(f"Estilo: {prefs['persona_style']}")
+
+    layer1_block = "\n".join(layer1_lines)
+    parts.append(layer1_block[:800])
+    chars_used = min(len(layer1_block), 800)
+
+    # --- Layer 2: Priority-ordered tiers ---
+    tier_config = [
+        ("immediate_context",    "CONTEXTO IMEDIATO",       600),
+        ("top_of_mind",          "FOCO ATUAL",              800),
+        ("recent_history",       "HISTÓRICO RECENTE",       600),
+        ("work_context",         "CONTEXTO PROFISSIONAL",   600),
+        ("personal_context",     "CONTEXTO PESSOAL",        600),
+        ("long_term_background", "HISTÓRICO DE LONGO PRAZO", 800),
+    ]
+
+    for tier_key, label, allotment in tier_config:
+        if chars_used >= TOTAL_BUDGET:
+            break
+        items = tier_rows.get(tier_key, [])
+        if not items:
+            continue
+
+        sorted_items = sorted(
+            items,
+            key=lambda x: (-x.get("importance", 5), x.get("last_reinforced", "")),
+        )
+
+        budget_left = min(allotment, TOTAL_BUDGET - chars_used)
+        tier_lines = [f"[{label}]"]
+        current_len = len(f"[{label}]\n")
+
+        for item in sorted_items:
+            flag = " ⚠" if item.get("is_flagged") else ""
+            line = f"- {item['content']}{flag}"
+            if current_len + len(line) + 1 > budget_left:
+                break
+            tier_lines.append(line)
+            current_len += len(line) + 1
+
+        if len(tier_lines) > 1:
+            block = "\n".join(tier_lines)
+            parts.append(block)
+            chars_used += len(block)
+
+    return "\n\n".join(parts)
+
+
 def build_system_prompt(
     user_profile: dict,
     persona_name: Optional[str] = None,
@@ -167,6 +252,12 @@ def build_system_prompt(
     social_graph: Optional[dict] = None,
     model_name: str = "",
     enable_agent: bool = True,
+    compacted_context: str = "",
+    search_context: str = "",
+    persona_memory: Optional[dict] = None,
+    # v3.2.0: Dual-layer memory architecture
+    user_preferences: Optional[dict] = None,
+    semantic_tiers: Optional[dict] = None,
 ) -> str:
     """Monta o system prompt completo com todas as camadas."""
 
@@ -174,10 +265,22 @@ def build_system_prompt(
         persona_name = get_active_persona()
 
     # Camada 1: Template global + dados do usuario
-    user_data = format_user_data(user_profile)
+    # v3.2.0: If new dual-layer data is provided, use it; otherwise fall back to legacy format
+    if user_preferences is not None and semantic_tiers is not None:
+        user_data = build_memory_context(user_preferences, semantic_tiers)
+    else:
+        user_data = format_user_data(user_profile)
     prompt = GLOBAL_TEMPLATE.replace("{user_data}", user_data)
 
-    # Camada 2: Spotify context
+    # Camada 2: Compacted conversation context
+    if compacted_context:
+        prompt += f"\n\n[CONTEXTO ANTERIOR DA CONVERSA]\n{compacted_context}\n"
+
+    # Camada 2.5: Search Context (Web or Lore)
+    if search_context:
+        prompt += f"\n\n[INFORMACOES RECUPERADAS (PESQUISA)]\n{search_context}\n"
+
+    # Camada 3: Spotify context
     if spotify_context:
         prompt += f"\n\n[CONTEXTO MUSICAL DO USUARIO]\n{spotify_context}\n"
 
@@ -185,6 +288,27 @@ def build_system_prompt(
     if social_graph:
         social_text = json.dumps(social_graph, indent=2, ensure_ascii=False)
         prompt += f"\n\n[INTERESSES SOCIAIS]\n{social_text}\n"
+
+    # Camada 3.5: Persona memory (per-persona quests, session context)
+    if persona_memory:
+        pm_parts = []
+        buffer = persona_memory.get("last_session_buffer", [])
+        if buffer:
+            pm_parts.append("Contexto da ultima sessao: " + "; ".join(buffer[-5:]))
+        quests = persona_memory.get("active_quests", {})
+        if quests:
+            quest_strs = []
+            for qk, qv in list(quests.items())[:5]:
+                status = qv.get("status", "In Progress") if isinstance(qv, dict) else "In Progress"
+                stage = qv.get("current_stage", "") if isinstance(qv, dict) else ""
+                quest_strs.append(f"{qk} ({status}" + (f", {stage}" if stage else "") + ")")
+            pm_parts.append("Quests ativas: " + "; ".join(quest_strs))
+        session_log = persona_memory.get("session_log", [])
+        if session_log:
+            recent_logs = session_log[-5:]
+            pm_parts.append("Sessoes recentes: " + " | ".join(recent_logs))
+        if pm_parts:
+            prompt += "\n\n[MEMORIA DA PERSONA - CONTEXTO ENTRE SESSOES]\n" + "\n".join(pm_parts) + "\n"
 
     # Camada 4: Knowledge legado
     knowledge = load_persona_knowledge(persona_name)

@@ -21,18 +21,44 @@ interface ChatState {
   availableModels: AvailableModel[];
   memoryNotifications: string[];
 
+  // Pending new chat: true when user clicked "New Chat" but hasn't sent a message yet.
+  // Session is created lazily on first message (Claude/ChatGPT pattern).
+  isPendingNewChat: boolean;
+
+  // Reasoning Settings
+  reasoningLevel: string;
+  enableThinking: boolean;
+
+  // Chat Settings (hydrated from localStorage)
+  streamingEnabled: boolean;
+  showTimestamps: boolean;
+  autoSaveTags: boolean;
+  internetSearchEnabled: boolean;
+  globalEnableThinking: boolean;
+
   // Actions
   setModel: (model: string) => void;
+  loadChatSettings: () => void;
   fetchAvailableModels: () => Promise<void>;
   fetchSessions: (persona?: string) => Promise<void>;
   loadSession: (id: number) => Promise<void>;
   createSession: (title?: string) => Promise<void>;
+  startNewChat: () => void;
   deleteSession: (id: number) => Promise<void>;
   renameSession: (id: number, title: string) => Promise<void>;
   sendMessage: (message: string, attachments?: Attachment[], mode?: 'default' | 'web_search' | 'lore_search') => Promise<void>;
   sendMessageStreaming: (message: string, attachments?: Attachment[], mode?: 'default' | 'web_search' | 'lore_search') => Promise<void>;
+  stopStreaming: () => void;
   addMessage: (msg: ChatMessage) => void;
   clearMessages: () => void;
+  setReasoningLevel: (level: string) => void;
+  setEnableThinking: (enabled: boolean) => void;
+}
+
+/** Gera um título automático a partir das primeiras palavras da mensagem (Claude pattern). */
+function autoTitle(message: string): string {
+  const words = message.trim().split(/\s+/).slice(0, 6).join(' ');
+  return words.length > 60 ? words.slice(0, 60) + '…' : words;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -41,11 +67,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingContent: '',
   activeSessionId: null,
   sessions: [],
-  model: 'PRO',
+  model: 'LITE',
   availableModels: [],
   memoryNotifications: [],
+  reasoningLevel: 'medium',
+  enableThinking: false,
+  isPendingNewChat: false,
+
+  // Chat settings defaults (overridden by loadChatSettings)
+  streamingEnabled: true,
+  showTimestamps: true,
+  autoSaveTags: true,
+  internetSearchEnabled: false,
+  globalEnableThinking: false,
 
   setModel: (model) => set({ model }),
+  loadChatSettings: () => {
+    try {
+      const stored = localStorage.getItem('ahri_settings_chat');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        set({
+          streamingEnabled: parsed.streaming_enabled ?? true,
+          showTimestamps: parsed.show_timestamps ?? true,
+          autoSaveTags: parsed.auto_save_tags ?? true,
+          internetSearchEnabled: parsed.internet_search_enabled ?? false,
+          globalEnableThinking: parsed.enable_thinking ?? false,
+          reasoningLevel: parsed.reasoning_level ?? 'off',
+        });
+      }
+    } catch { /* ignore parse errors */ }
+  },
+  setReasoningLevel: (level) => set({ reasoningLevel: level }),
+  setEnableThinking: (enabled) => set({ enableThinking: enabled }),
 
   fetchAvailableModels: async () => {
     try {
@@ -76,6 +130,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({
         activeSessionId: id,
         messages: detail.messages,
+        isPendingNewChat: false,
       });
     } catch (e) {
       console.error('Failed to load session:', e);
@@ -89,10 +144,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
         sessions: [session, ...state.sessions],
         activeSessionId: session.id,
         messages: [],
+        isPendingNewChat: false,
       }));
     } catch (e) {
       console.error('Failed to create session:', e);
     }
+  },
+
+  /**
+   * Inicia um novo chat localmente (Claude/ChatGPT pattern).
+   * NÃO cria sessão no backend ainda — isso acontece ao enviar a primeira mensagem.
+   */
+  startNewChat: () => {
+    set({
+      messages: [],
+      activeSessionId: null,
+      isPendingNewChat: true,
+      streamingContent: '',
+      isStreaming: false,
+      memoryNotifications: [],
+    });
   },
 
   deleteSession: async (id) => {
@@ -127,7 +198,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // HTTP (non-streaming) fallback
   sendMessage: async (message, attachments = [], mode = 'default') => {
-    const { model } = get();
+    const { model, reasoningLevel, enableThinking, autoSaveTags, internetSearchEnabled, isPendingNewChat } = get();
+
+    // Se está em modo pendente, cria a sessão agora com o título automático
+    if (isPendingNewChat) {
+      try {
+        const session = await api.createSession(autoTitle(message));
+        set((state) => ({
+          sessions: [session, ...state.sessions],
+          activeSessionId: session.id,
+          isPendingNewChat: false,
+        }));
+      } catch (e) {
+        console.error('Failed to auto-create session:', e);
+      }
+    }
+
+    // Wire: internet_search_enabled → override mode to web_search when default
+    const effectiveMode = (mode === 'default' && internetSearchEnabled) ? 'web_search' : mode;
 
     // Extrai images, video, pdfs
     const images = attachments.filter(a => a.type === 'image').map(a => a.data);
@@ -150,11 +238,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const response = await api.sendMessage({
         message,
+        session_id: get().activeSessionId ?? undefined,
         images,
         video: video ? { data: video.data, name: video.name } : undefined,
         pdfs: pdfs.map(p => ({ data: p.data, name: p.name })),
-        mode,
+        mode: effectiveMode,
         model,
+        reasoning_level: reasoningLevel,
+        enable_thinking: enableThinking,
+        auto_save_tags: autoSaveTags,
       });
 
       set((state) => ({
@@ -180,7 +272,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // WebSocket streaming
   sendMessageStreaming: async (message, attachments = [], mode = 'default') => {
-    const { model } = get();
+    const { model, reasoningLevel, enableThinking, autoSaveTags, internetSearchEnabled, isPendingNewChat } = get();
+
+    // Se está em modo pendente, cria a sessão agora com o título automático
+    if (isPendingNewChat) {
+      try {
+        const session = await api.createSession(autoTitle(message));
+        set((state) => ({
+          sessions: [session, ...state.sessions],
+          activeSessionId: session.id,
+          isPendingNewChat: false,
+        }));
+      } catch (e) {
+        console.error('Failed to auto-create session:', e);
+      }
+    }
+
+    // Wire: internet_search_enabled → override mode to web_search when default
+    const effectiveMode = (mode === 'default' && internetSearchEnabled) ? 'web_search' : mode;
 
     // Extrai images, video, pdfs
     const images = attachments.filter(a => a.type === 'image').map(a => a.data);
@@ -260,7 +369,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
-    chatWs.sendMessage(message, model, images, video, pdfs, mode);
+    chatWs.sendMessage(message, model, get().activeSessionId ?? undefined, images, video, pdfs, effectiveMode, {
+      reasoning_level: reasoningLevel,
+      enable_thinking: enableThinking,
+      auto_save_tags: autoSaveTags,
+    });
+  },
+
+  stopStreaming: () => {
+    const { isStreaming } = get();
+    if (!isStreaming) return;
+
+    chatWs.cancel(); // We need to add this method to chatWs
+    set({ isStreaming: false, streamingContent: '' });
   },
 
   addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),

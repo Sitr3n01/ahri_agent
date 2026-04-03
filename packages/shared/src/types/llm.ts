@@ -1,20 +1,23 @@
 /**
- * Types para modelos LLM disponíveis e OAuth status.
+ * Types para modelos LLM disponíveis.
  */
 
 export interface AvailableModel {
   id: string;
   display_name: string;
-  provider: 'google_oauth' | 'google_apikey' | 'openrouter' | 'ollama';
+  provider: 'google_apikey' | 'openrouter' | 'ollama';
   color: string;
   description?: string;
   input_token_limit?: number;
   output_token_limit?: number;
 }
 
-export interface OAuthStatus {
-  configured: boolean;
-  connected: boolean;
-  email: string | null;
-  models: AvailableModel[];
+export interface GoogleModelInfo {
+  name: string;
+  display_name: string;
+  supported_generation_methods: string[];
+}
+
+export interface GoogleModelCheckResponse {
+  models: GoogleModelInfo[];
 }

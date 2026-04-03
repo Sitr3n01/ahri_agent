@@ -1,6 +1,6 @@
 import { memo, useCallback, useState } from 'react';
 import { usePersonaStore } from '@/stores/persona-store';
-import { getPersonaTheme } from '@ahri/shared';
+import { usePersonaTheme } from '@/hooks/usePersonaTheme';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -12,13 +12,16 @@ interface MessageProps {
   timestamp: string;
   images?: string[];
   isStreaming?: boolean;
+  showTimestamp?: boolean;
 }
 
-export const Message = memo(function Message({ role, content, timestamp, images, isStreaming }: MessageProps) {
+export const Message = memo(function Message({ role, content, timestamp, images, isStreaming, showTimestamp = true }: MessageProps) {
   const isUser = role === 'user';
   const isError = content.startsWith('[Erro]') || content.startsWith('[Error]');
-  const activePersona = usePersonaStore((s) => s.activePersona);
-  const personaTheme = getPersonaTheme(activePersona);
+  const activePersonaId = usePersonaStore((s) => s.activePersona);
+  const personas = usePersonaStore((s) => s.personas);
+  const activePersonaObj = personas.find(p => p.name === activePersonaId);
+  const personaTheme = usePersonaTheme(activePersonaId);
   const personaAvatar = personaTheme.avatar;
 
   const [userImgError, setUserImgError] = useState(false);
@@ -32,7 +35,7 @@ export const Message = memo(function Message({ role, content, timestamp, images,
       {/* Message Row */}
       <div className={`flex items-end gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
         {/* Avatar */}
-        <div className="flex-shrink-0 mb-5">
+        <div className="flex-shrink-0">
           {isUser ? (
             /* User avatar (no glow) */
             <div
@@ -82,8 +85,22 @@ export const Message = memo(function Message({ role, content, timestamp, images,
                   ? 'chat-bubble-user'
                   : 'chat-bubble-assistant'
               }
+              ${!content && !isUser ? 'chat-bubble-none' : ''}
             `}
           >
+            {!content && !isUser && (
+              <div className="flex items-center min-h-[40px] px-2">
+                <span 
+                  className="text-base font-bold tracking-tight persona-logo-text animate-pulse italic whitespace-nowrap" 
+                  style={{ 
+                    '--logo-primary': personaTheme.primary,
+                    '--logo-secondary': personaTheme.secondary,
+                  } as React.CSSProperties}
+                >
+                  {activePersonaObj ? activePersonaObj.display_name : 'Ahri'} está pensando...
+                </span>
+              </div>
+            )}
             {/* Images */}
             {images && images.length > 0 && (
               <div className={`grid gap-2 mb-3 ${images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
@@ -111,7 +128,7 @@ export const Message = memo(function Message({ role, content, timestamp, images,
             )}
 
             {/* Content with react-markdown or typing indicator */}
-            {content ? (
+            {content && (
               <div className={`text-sm leading-relaxed ${isStreaming ? 'streaming-cursor' : ''} markdown-body`}>
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
@@ -233,28 +250,17 @@ export const Message = memo(function Message({ role, content, timestamp, images,
                   {content}
                 </ReactMarkdown>
               </div>
-            ) : (
-              <div className="typing-indicator">
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-              </div>
             )}
           </div>
 
           {/* Timestamp (below bubble) */}
-          {timestamp && (
-            <span className={`text-xs font-mono px-2 ${isUser ? 'text-right' : 'text-left'}`} style={{ color: 'var(--text-tertiary)' }}>
+          {showTimestamp && timestamp && (
+            <span className={`text-[10px] font-medium tracking-wide uppercase px-2 opacity-60 mix-blend-overlay ${isUser ? 'text-right' : 'text-left'}`} style={{ color: 'var(--text-tertiary)' }}>
               {timestamp}
             </span>
           )}
 
-          {/* Streaming indicator */}
-          {isStreaming && (
-            <span className="text-xs px-2 animate-pulse" style={{ color: 'var(--persona-primary)' }}>
-              digitando...
-            </span>
-          )}
+          {/* Streaming indicator removed */}
         </div>
       </div>
     </div>

@@ -10,7 +10,10 @@ Capabilities:
 - Take screenshots
 - Handle JavaScript-heavy sites
 """
+import logging
 from typing import Any, Dict, List
+
+logger = logging.getLogger("ahri.worker.browser")
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.database import AgentWorkerTask
@@ -26,11 +29,20 @@ class BrowserWorker(BaseWorker):
         playwright install chromium
     """
 
+    ROLE_PROMPT = (
+        "[ROLE: Browser Automation Agent]\n"
+        "You automate browser interactions: navigate, click, fill forms, extract data.\n"
+        "Wait for page loads before interacting. Handle dynamic content gracefully.\n"
+        "For extraction: use CSS selectors when provided, LLM-guided otherwise.\n"
+        "Report navigation state (current URL, page title) after each action.\n"
+        "Output: JSON with action results and current browser state."
+    )
+
     def __init__(self, llm_service):
         super().__init__(
             llm_service=llm_service,
             worker_type="Browser",
-            default_model="PRO"
+            default_model="LITE"
         )
         self.browser = None
         self.playwright_available = False
@@ -70,6 +82,8 @@ class BrowserWorker(BaseWorker):
             await db.refresh(task)
             return task
 
+        import time
+        start_time = time.time()
         task = await self._create_task_record(db, execution_id, input_data)
 
         try:
@@ -97,18 +111,11 @@ class BrowserWorker(BaseWorker):
 
                 await browser.close()
 
-            task.output_data = result
-            task.status = "completed"
-            await db.commit()
-            await db.refresh(task)
-            return task
+            tokens = self._estimate_tokens(str(result))
+            return await self._complete_task(db, task, result, tokens, start_time)
 
         except Exception as e:
-            task.status = "failed"
-            task.error = str(e)
-            await db.commit()
-            await db.refresh(task)
-            return task
+            return await self._fail_task(db, task, str(e), start_time)
 
     async def _navigate(self, page, input_data: Dict) -> Dict[str, Any]:
         """Navigate to URL and wait for page load."""
@@ -145,8 +152,8 @@ class BrowserWorker(BaseWorker):
         # Wait for navigation if triggered
         try:
             await page.wait_for_load_state("networkidle", timeout=5000)
-        except:
-            pass
+        except Exception:
+            logger.debug("networkidle wait timed out after click, continuing")
 
         return {
             "clicked": True,
@@ -165,12 +172,14 @@ class BrowserWorker(BaseWorker):
 
         # Fill each field
         filled_fields = []
+        failed_fields = []
         for selector, value in form_data.items():
             try:
                 await page.fill(selector, str(value))
                 filled_fields.append(selector)
             except Exception as e:
-                filled_fields.append(f"{selector} (failed: {str(e)})")
+                logger.warning(f"Failed to fill form field '{selector}': {e}")
+                failed_fields.append(f"{selector}: {str(e)}")
 
         # Submit if requested
         submitted = False
@@ -179,9 +188,11 @@ class BrowserWorker(BaseWorker):
             await page.wait_for_load_state("networkidle", timeout=10000)
             submitted = True
 
+        all_succeeded = len(failed_fields) == 0
         return {
-            "form_filled": True,
+            "form_filled": all_succeeded,
             "fields_filled": filled_fields,
+            "fields_failed": failed_fields,
             "submitted": submitted,
             "current_url": page.url
         }
@@ -204,7 +215,8 @@ class BrowserWorker(BaseWorker):
                         extracted[key] = await element.text_content()
                     else:
                         extracted[key] = None
-                except:
+                except Exception as e:
+                    logger.warning(f"Failed to extract '{key}' with selector '{selector}': {e}")
                     extracted[key] = None
 
             return {
@@ -244,7 +256,7 @@ Retorne em JSON:
 
             response = await self._call_llm(
                 prompt=prompt,
-                model="PRO",
+                model=self.default_model,
                 schema={
                     "type": "object",
                     "properties": {

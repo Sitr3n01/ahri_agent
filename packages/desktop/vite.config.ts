@@ -12,6 +12,12 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    proxy: {
+      '/data': {
+        target: 'http://localhost:8742',
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     outDir: 'dist',

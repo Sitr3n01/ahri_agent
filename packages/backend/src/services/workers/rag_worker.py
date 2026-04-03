@@ -2,7 +2,7 @@
 RAG Worker - Retrieval-Augmented Generation for lore and knowledge queries.
 
 Specializes in ChromaDB vector search and synthesizing answers from persona lore.
-Uses Gemma 3 12B for better context understanding (128K tokens).
+Uses the configured agent model for context understanding.
 """
 import time
 from typing import Optional
@@ -18,10 +18,24 @@ class RAGWorker(BaseWorker):
     """
     RAG worker for vector database queries and lore retrieval.
 
+    ROLE_PROMPT guides the LLM to focus on synthesis from retrieved documents."""
+
+    ENABLE_EVALUATION = False  # One-shot retrieval + synthesis, no iterative improvement
+
+    ROLE_PROMPT = (
+        "[ROLE: Knowledge Retrieval Specialist]\n"
+        "You synthesize answers ONLY from the provided retrieved documents.\n"
+        "If the documents don't contain the answer, say so explicitly.\n"
+        "Cite which document/chunk informed each part of your answer.\n"
+        "Never fabricate information not present in the retrieved context.\n"
+        "Output: JSON with 'answer', 'sources', and 'confidence' fields."
+    )
+
+    """
+
     Input schema:
     {
         "query": str,              # Question or search query
-        "persona_name": str,       # Persona to search (optional, searches all if empty)
         "top_k": int               # Number of results to retrieve (default: 5)
     }
 
@@ -41,7 +55,7 @@ class RAGWorker(BaseWorker):
         super().__init__(
             llm_service=llm_service,
             worker_type="RAG",
-            default_model="GOOGLE"  # Gemma 3 27B via LLMService
+            default_model="LITE"
         )
         self.vector_service = vector_service or VectorService()
 
@@ -60,38 +74,25 @@ class RAGWorker(BaseWorker):
         try:
             # Extract input parameters
             query = input_data.get("query", "")
-            persona_name = input_data.get("persona_name", "")
             top_k = input_data.get("top_k", 5)
 
             if not query:
                 raise ValueError("Query is required")
 
-            # Step 1: Retrieve from ChromaDB
-            results = self.vector_service.query(
-                query_text=query,
-                persona_name=persona_name if persona_name else None,
-                top_k=top_k
+            # Step 1: Retrieve from ChromaDB via search_memory()
+            context = self.vector_service.search_memory(
+                query=query,
+                n_results=top_k,
             )
 
-            if not results:
-                # No documents found - return empty answer
+            if not context.strip():
                 output_data = {
                     "answer": f"No information found for query: {query}",
                     "sources": []
                 }
                 return await self._complete_task(db, task, output_data, 0, start_time)
 
-            # Step 2: Format retrieved documents for LLM
-            context_parts = []
-            for i, result in enumerate(results, 1):
-                doc_text = result.get("text", "")
-                metadata = result.get("metadata", {})
-                source_file = metadata.get("source_file", "unknown")
-                context_parts.append(f"[Document {i} from {source_file}]\n{doc_text}\n")
-
-            context = "\n".join(context_parts)
-
-            # Step 3: Use Gemma 3 27B to synthesize answer
+            # Step 3: Synthesize answer from retrieved docs
             prompt = f"""Based on the following retrieved documents, answer the user's question.
 
 Retrieved Documents:
@@ -115,13 +116,7 @@ Answer:"""
             # Step 4: Format output
             output_data = {
                 "answer": answer,
-                "sources": [
-                    {
-                        "text": r.get("text", "")[:500],  # Truncate for storage
-                        "metadata": r.get("metadata", {})
-                    }
-                    for r in results
-                ]
+                "sources": context,
             }
 
             return await self._complete_task(db, task, output_data, tokens_used, start_time)

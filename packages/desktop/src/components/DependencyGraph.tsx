@@ -68,6 +68,8 @@ export function DependencyGraph({ steps }: DependencyGraphProps) {
       Vision: 'bg-orange-500',
       Browser: 'bg-indigo-500',
       Router: 'bg-yellow-500',
+      Search: 'bg-teal-500',
+      Dynamic: 'bg-amber-500',
     };
     return colors[worker] || 'bg-gray-500';
   };
@@ -82,6 +84,8 @@ export function DependencyGraph({ steps }: DependencyGraphProps) {
       Vision: '👁️',
       Browser: '🌍',
       Router: '🔀',
+      Search: '🔎',
+      Dynamic: '✨',
     };
     return icons[worker] || '⚙️';
   };

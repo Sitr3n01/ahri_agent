@@ -39,7 +39,7 @@ export function SettingsView() {
 
   const models: Array<{ value: any; label: string; description: string }> = [
     { value: 'PRO', label: 'Gemini Pro', description: 'Rápido e inteligente' },
-    { value: 'GOOGLE', label: 'Gemma 27B', description: 'Código e análise' },
+    { value: 'GOOGLE', label: 'Flash Lite', description: 'Código e análise' },
     { value: 'DEEPSEEK', label: 'DeepSeek R1', description: 'Raciocínio profundo' },
     { value: 'LOCAL', label: 'Local (Ollama)', description: 'Offline' }
   ];

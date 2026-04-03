@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/zegil/Downloads/src/src/**)",
+      "WebFetch(domain:raw.githubusercontent.com)"
+    ]
+  }
+}

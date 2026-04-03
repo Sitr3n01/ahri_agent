@@ -166,3 +166,20 @@ export function getPersonaTheme(name: string): PersonaTheme {
   const key = name.toLowerCase().replace(/_/g, ' ');
   return personaThemes[key] ?? personaThemes[DEFAULT_PERSONA];
 }
+
+/**
+ * Mescla o tema estático (hardcoded) com possíveis overrides dinâmicos vindos do banco de dados.
+ */
+export function mergePersonaTheme(staticTheme: PersonaTheme, overrides?: Partial<PersonaTheme>): PersonaTheme {
+  if (!overrides) return staticTheme;
+  return {
+    ...staticTheme,
+    primary: overrides.primary || staticTheme.primary,
+    secondary: overrides.secondary || staticTheme.secondary,
+    shadow: overrides.shadow || staticTheme.shadow,
+    glow: overrides.glow || staticTheme.glow,
+    avatar: overrides.avatar || staticTheme.avatar,
+    background: overrides.background || staticTheme.background,
+    backgroundMobile: overrides.backgroundMobile || staticTheme.backgroundMobile,
+  };
+}
