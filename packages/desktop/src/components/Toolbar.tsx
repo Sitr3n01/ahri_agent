@@ -3,7 +3,6 @@ import { usePersonaTheme } from '@/hooks/usePersonaTheme';
 import { usePersonaStore } from '@/stores/persona-store';
 import { useThemeStore } from '@/stores/theme-store';
 import { useUIStore } from '@/stores/ui-store';
-import { useAgentModeStore } from '@/stores/agent-mode-store';
 import { useEngineStore } from '@/stores/engine-store';
 import { useT } from '@/stores/i18n-store';
 import type { AppMode } from '@/App';
@@ -31,7 +30,6 @@ export function Toolbar({ mode, setMode, previousMode = 'chat' }: ToolbarProps) 
 
   const modes: { key: AppMode; label: string }[] = [
     { key: 'chat', label: t('nav.chat') },
-    { key: 'agent', label: t('nav.agent') },
   ];
 
   // Close menu on click outside
@@ -205,42 +203,29 @@ export function Toolbar({ mode, setMode, previousMode = 'chat' }: ToolbarProps) 
         }}
       >
         {/* Animated Slide Background */}
-        <div 
+        <div
           className="absolute inset-y-0.5 rounded-md transition-transform duration-300 cubic-bezier(0.16, 1, 0.3, 1)"
           style={{
-            width: 'calc(50% - 2px)',
+            width: 'calc(100% - 4px)',
             left: '2px',
-            transform: mode === 'agent' ? 'translateX(100%)' : 'translateX(0)',
             background: `linear-gradient(135deg, ${theme.primary}, ${theme.secondary})`,
             boxShadow: `0 0 10px ${theme.shadow}`,
             zIndex: 0,
           }}
         />
         {modes.map((m) => {
-          const isAgentStoreRunning = useAgentModeStore.getState().activeExecution?.status === 'running';
-          const isEngineStoreRunning = useEngineStore.getState().isRunning;
-          const isAgentRunning = m.key === 'agent' && (isAgentStoreRunning || isEngineStoreRunning);
+          const isEngineRunning = m.key === 'chat' && useEngineStore.getState().isRunning;
           return (
             <button
               key={m.key}
-              onClick={(e) => {
-                // Agent mode is restricted to Ctrl+Click for development
-                if (m.key === 'agent' && !e.ctrlKey && mode !== 'agent') {
-                  return;
-                }
-                setMode(m.key);
-              }}
-              className={`relative z-10 flex-1 py-1 text-xs font-medium rounded-md transition-all duration-200 text-center flex items-center justify-center gap-1.5 ${
-                m.key === 'agent' && mode !== 'agent' ? 'cursor-default' : 'cursor-pointer'
-              }`}
+              onClick={() => setMode(m.key)}
+              className="relative z-10 flex-1 py-1 text-xs font-medium rounded-md transition-all duration-200 text-center flex items-center justify-center gap-1.5 cursor-pointer"
               style={{
                 color: mode === m.key ? 'rgba(0,0,0,0.85)' : 'var(--text-secondary)',
-                opacity: m.key === 'agent' && mode !== 'agent' ? 0.6 : 1,
               }}
-              title={m.key === 'agent' && mode !== 'agent' ? 'Modo Agente (Desenvolvimento)' : undefined}
             >
               {m.label}
-              {isAgentRunning && mode !== 'agent' && (
+              {isEngineRunning && (
                 <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#3b82f6' }} />
               )}
             </button>

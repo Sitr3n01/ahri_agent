@@ -332,13 +332,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           memoryNotifications: data.memory_notifications,
         }));
 
-        // Adiciona agent tasks ao agent-store
-        if (data.agent_tasks && data.agent_tasks.length > 0) {
-          const { useAgentStore } = await import('./agent-store');
-          data.agent_tasks.forEach((task: any) => {
-            useAgentStore.getState().addTask(task);
-          });
-        }
+
       },
       onError: (error) => {
         const errorMsg: ChatMessage = {

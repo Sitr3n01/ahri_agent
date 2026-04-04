@@ -17,18 +17,18 @@ from src.core.llm_clients import GeminiClient
 
 from src.config import get_settings
 from src.dependencies import AuthDep, DbDep, SettingsDep
-from src.models.schemas import ChatRequest, ChatResponse, ChatMessageSchema, AgentTaskSchema, FileAttachment
+from src.models.schemas import ChatRequest, ChatResponse, ChatMessageSchema, FileAttachment
 from src.services.llm_service import get_llm_service
 from src.services.memory_service import MemoryService
 from src.services.session_service import SessionService
 from src.services.persona_service import get_active_persona
 from src.services.spotify_service import get_spotify_service
 from src.core.prompt_builder import build_system_prompt
-from src.core.save_tag_parser import extract_save_tags, extract_agent_tags, clean_all_tags
+from src.core.save_tag_parser import extract_save_tags, clean_all_tags
 from src.core.memory_analyzer import analyze_incremental, analyze_incremental_v2, TIER_MAP
 from src.services.semantic_memory_service import SemanticMemoryService
 from src.services.vector_service import get_vector_service
-from src.services.agent_service import get_permission_level, execute_task as execute_agent_task
+
 from src.services.compaction_service import CompactionService
 from src.services.search_service import SearchService
 
@@ -168,36 +168,6 @@ def _process_save_tags(full_response: str, persona_name: str) -> list[str]:
 
     return notifications
 
-
-def _process_agent_tags(full_response: str) -> list[AgentTaskSchema]:
-    """Processa [[AGENT:]] tags e executa/enfileira tasks."""
-    tasks = []
-    tags = extract_agent_tags(full_response)
-
-    for tag in tags:
-        perm = get_permission_level(tag.capability)
-
-        if perm.value == "SAFE":
-            # Executa automaticamente
-            result = execute_agent_task(tag.capability, tag.parameters)
-            tasks.append(AgentTaskSchema(
-                capability=tag.capability,
-                parameters=tag.parameters,
-                permission_level=perm,
-                status="completed" if not result.get("error") else "failed",
-                result=result.get("result", ""),
-                error=result.get("error", ""),
-            ))
-        else:
-            # Requer aprovação
-            tasks.append(AgentTaskSchema(
-                capability=tag.capability,
-                parameters=tag.parameters,
-                permission_level=perm,
-                status="pending",
-            ))
-
-    return tasks
 
 
 def _run_memory_analysis_bg(user_msg: str, ai_msg: str, profile: dict, session_id: Optional[int] = None):
@@ -374,10 +344,6 @@ async def send_message(
     else:
         notifications = []
 
-    # 8. Processa [[AGENT:]] tags (assume fast enough or internal async, but keeping sync for now as it calls agent_service)
-    agent_tasks = _process_agent_tags(full_response)
-
-
     # 8. Limpa tags do texto de display
     clean_response = clean_all_tags(full_response)
 
@@ -403,7 +369,6 @@ async def send_message(
             timestamp=datetime.now().strftime("%H:%M:%S"),
             meta={"model": request.model},
         ),
-        agent_tasks=agent_tasks,
         memory_notifications=notifications,
         search_context=search_ctx if search_ctx else None
     )
@@ -595,7 +560,6 @@ async def chat_websocket(websocket: WebSocket, settings: SettingsDep):
                         notifications = await loop.run_in_executor(None, _process_save_tags, full_response, persona_name)
                     else:
                         notifications = []
-                    agent_tasks = _process_agent_tags(full_response)
                     clean_response = clean_all_tags(full_response)
 
                     # Salva resposta
@@ -610,7 +574,6 @@ async def chat_websocket(websocket: WebSocket, settings: SettingsDep):
                     await websocket.send_json({
                         "type": "done",
                         "content": clean_response,
-                        "agent_tasks": [t.model_dump() for t in agent_tasks],
                         "memory_notifications": notifications,
                         "search_context": search_ctx if search_ctx else None
                     })

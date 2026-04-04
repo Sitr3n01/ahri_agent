@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.config import get_settings
 from src.models.database import init_db, close_db
-from src.routers import auth, chat, personas, memory, sessions, agent, search, spotify, agent_mode, settings
+from src.routers import auth, chat, personas, memory, sessions, search, spotify, settings
 
 logger = logging.getLogger("ahri.main")
 
@@ -134,8 +134,6 @@ app.include_router(chat.router, prefix="/chat", tags=["Chat"])
 app.include_router(personas.router, prefix="/personas", tags=["Personas"])
 app.include_router(memory.router, prefix="/memory", tags=["Memory"])
 app.include_router(sessions.router, prefix="/sessions", tags=["Sessions"])
-app.include_router(agent.router, prefix="/agent", tags=["Agent"])
-app.include_router(agent_mode.router)  # Agent mode has its own prefix
 app.include_router(search.router, prefix="/search", tags=["Search"])
 app.include_router(spotify.router, prefix="/spotify", tags=["Spotify"])
 app.include_router(settings.router, prefix="/settings", tags=["Settings"])

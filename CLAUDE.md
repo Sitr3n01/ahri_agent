@@ -28,8 +28,8 @@ ahri-v3/                          # Monorepo (Turborepo + npm workspaces)
 │   │   │   ├── main.py           # FastAPI app, CORS, lifespan
 │   │   │   ├── config.py         # Pydantic BaseSettings (.env)
 │   │   │   ├── dependencies.py   # FastAPI Depends() injection
-│   │   │   ├── routers/          # 9 routers: auth, chat, personas, memory, sessions, agent, agent_mode, search, spotify
-│   │   │   ├── services/         # 10 services + 8 workers
+│   │   │   ├── routers/          # 8 routers: auth, chat, personas, memory, sessions, search, spotify, engine_v2
+│   │   │   ├── services/         # 7 services (agent mode removido; V4 engine em src/engine/)
 │   │   │   ├── core/             # prompt_builder, llm_clients, save_tag_parser, memory_analyzer
 │   │   │   ├── models/           # schemas.py (Pydantic), database.py (SQLAlchemy)
 │   │   │   └── scripts/          # migrate_data.py (JSON→SQLite)
@@ -54,7 +54,7 @@ ahri-v3/                          # Monorepo (Turborepo + npm workspaces)
 - Config files: tsconfig, vite, tailwind, postcss, electron-builder, turbo.json
 
 ### ✅ Fase 1 - Backend API (COMPLETED)
-**Services (10):**
+**Services (7):**
 - `llm_service.py` - Multi-LLM wrapper (Gemini/Gemma/DeepSeek/Ollama)
 - `memory_service.py` - 3-layer memory (session/profile/RAG)
 - `persona_service.py` - Persona loader from persona.md
@@ -62,14 +62,11 @@ ahri-v3/                          # Monorepo (Turborepo + npm workspaces)
 - `session_service.py` - Chat session CRUD
 - `search_service.py` - Google Custom Search API
 - `spotify_service.py` - Spotify OAuth + current track
-- `agent_service.py` - Single-agent task queue
-- `orchestrator_service.py` - Multi-agent coordinator
-- `tpm_manager.py` - Token rate limiting (15k TPM, **thread-safe with locks**)
 
 **Core Modules (4):**
 - `prompt_builder.py` - System prompt builder
 - `llm_clients.py` - Per-request GeminiClient instances (thread-safe fix)
-- `save_tag_parser.py` - Parse [[SAVE:]] and [[AGENT:]] tags
+- `save_tag_parser.py` - Parse [[SAVE:]] tags
 - `memory_analyzer.py` - Classify memory importance (CRITICAL/IMPORTANT/USEFUL/IGNORE)
 
 **Routers (9):**
@@ -78,15 +75,13 @@ ahri-v3/                          # Monorepo (Turborepo + npm workspaces)
 - `/personas` - List, get, activate personas
 - `/sessions` - CRUD operations
 - `/memory` - /memoria, /aprender, /esquecer
-- `/agent` - Single-agent task approval
-- `/agent-mode` - Multi-agent orchestration + WebSocket
 - `/search` - Web search, lore search
 - `/spotify` - Current track, listening context
+- `/engine/v2` - V4 Engine (ativado via `engine_v2_enabled=True`)
 
-**Database (12 tables):**
+**Database (9 tables):**
 - UserProfile, ChatSession, ChatMessage, PersonaMemory, SocialGraphEntry, EpisodicMemory
-- AgentTask, AgentExecution, AgentWorkerTask, TPMQuota
-- RagIngestionTracker, SearchQuota
+- RagIngestionTracker, SearchQuota, UserPreferences
 
 **Features:**
 - JWT auth (access 15min + refresh 7d)
@@ -95,8 +90,6 @@ ahri-v3/                          # Monorepo (Turborepo + npm workspaces)
 - Migration script (JSON→SQLite, idempotent)
 - Test suite (~25 async tests)
 - **Thread-safe LLM clients** (per-request GeminiClient instances)
-- **Thread-safe TPMManager** (threading.Lock for concurrent access)
-- **WebSocket timeout** (10 minutes max polling duration)
 
 ### ✅ Fase 2 - Desktop App (COMPLETED)
 
@@ -104,25 +97,23 @@ ahri-v3/                          # Monorepo (Turborepo + npm workspaces)
 - `auth-store.ts` - JWT authentication
 - `persona-store.ts` - Persona selection
 - `chat-store.ts` - Chat messages, streaming
-- `agent-store.ts` - Single-agent task queue
-- `agent-mode-store.ts` - Multi-agent executions
+- `engine-store.ts` - V4 Engine executions
+- `ui-store.ts` / `theme-store.ts` / `i18n-store.ts` - UI state
 
-**Features (14):**
+**Features:**
 1. ✅ Shared API client (`@ahri/shared/AhriApiClient`)
 2. ✅ LoginView with glassmorphism
 3. ✅ ChatView with WebSocket streaming
 4. ✅ ChatInput (auto-resize textarea, drag & drop, paste images)
 5. ✅ MessageBubble (markdown, code blocks, image rendering)
-6. ✅ Sidebar (persona selector, session list, model selector, agent badge, logout, mode toggle)
-7. ✅ AgentPanel (task cards, approve/deny, status colors)
-8. ✅ AgentModeView (orchestrated multi-agent UI)
-9. ✅ File upload UI (drag & drop, paste, compression)
-10. ✅ Vision/Multimodal (Gemini File API for video/PDF)
-11. ✅ Terminal commands (/memoria, /aprender, /esquecer)
-12. ✅ Auto-Persona Daemon (Spotify polling in Electron)
-13. ✅ Persona backgrounds + avatars (17 unique themes)
-14. ✅ Search mode toggle (web_search, lore_search, default)
-15. ✅ Session rename (inline editing)
+6. ✅ Sidebar (persona selector, session list, logout, settings toggle)
+7. ✅ File upload UI (drag & drop, paste, compression)
+8. ✅ Vision/Multimodal (Gemini File API for video/PDF)
+9. ✅ Terminal commands (/memoria, /aprender, /esquecer)
+10. ✅ Auto-Persona Daemon (Spotify polling in Electron)
+11. ✅ Persona backgrounds + avatars (17 unique themes)
+12. ✅ Search mode toggle (web_search, lore_search, default)
+13. ✅ Session rename (inline editing)
 
 **Electron Features:**
 - Backend lifecycle management (spawn/kill Python uvicorn)
@@ -138,63 +129,25 @@ ahri-v3/                          # Monorepo (Turborepo + npm workspaces)
 - Responsive layout
 - Animations (fade, slide, pulse)
 
-### ✅ Fase 3 - Agent Mode (COMPLETED)
+### 🔄 Fase 3 - V4 Engine (EM DESENVOLVIMENTO)
 
-**Phase 1 - Foundation:**
-- ✅ Database tables (AgentExecution, AgentWorkerTask, TPMQuota)
-- ✅ TPMManager service (15k TPM sliding window, **thread-safe**)
-- ✅ BaseWorker abstract class
-- ✅ RAGWorker (ChromaDB search + Gemma 3 synthesis)
-- ✅ OrchestratorService (planning, delegation, synthesis)
-- ✅ Agent Mode Router (3 REST endpoints + WebSocket)
-- ✅ Frontend UI (mode toggle, task input, status display)
+O Agent Mode original foi **removido** e substituído pelo V4 Engine — uma arquitetura mais limpa baseada em QueryEngine, tools, hooks e plugins.
 
-**Phase 2 - 7 Workers:**
-1. ✅ **Code Worker** (GOOGLE mode) - Analyze, generate, review, execute (sandboxed Python)
-2. ✅ **Shell Worker** (GOOGLE mode) - File ops (read/write/list), safe shell commands
-3. ✅ **Memory Worker** (GOOGLE mode) - Search episodic/profile/session memories
-4. ✅ **Web Worker** (GOOGLE mode) - URL fetch, scraping, summarization
-5. ✅ **Vision Worker** (PRO mode) - Image analysis, OCR, object detection
-6. ✅ **Browser Worker** (PRO mode) - Playwright automation (navigate, click, form fill)
-7. ✅ **Router Worker** (GOOGLE mode) - Task classification, worker selection
+**Localização:** `packages/backend/src/engine/`
 
-**Phase 3 - Advanced Features (COMPLETED):**
-- ✅ **WebSocket Real-Time Streaming** (useAgentModeWebSocket hook, 259 LOC)
-  - Auto-reconnect logic, 500ms polling interval
-  - Real-time execution status, worker events, TPM quota tracking
-  - Thread-safe state sync with Zustand store
-- ✅ **TPM Quota Meter UI** (TPMQuotaMeter component, 75 LOC)
-  - Color-coded progress bar (green <70%, yellow 70-90%, red >90%)
-  - Real-time token counts and utilization percentage
-  - Warning banner when quota >90%
-- ✅ **Reasoning Timeline Visual** (ReasoningTimeline component, 334 LOC)
-  - Main reasoning display with orchestrator thinking
-  - Step-by-step timeline with status icons (pending/running/completed/failed)
-  - Expandable step details (input/output/errors/timestamps/tokens)
-  - Dependency indicators between steps
-- ✅ **Dependency Graph Visualization** (DependencyGraph component, 179 LOC)
-  - Topological sort algorithm for level-based layout
-  - Parallel execution indicator
-  - Worker color-coding (8 unique colors)
-  - Dependency arrows between levels
-- ✅ **Execution History Advanced Filters** (ExecutionHistory updates, +80 LOC)
-  - Search bar (full-text goal search)
-  - Status filters (all/completed/failed/running)
-  - Sort options (newest/oldest/fastest/slowest)
-  - Orchestrator filter (by model)
-  - Delete individual execution feature
-- ✅ **Gemini Function Calling for Planner** (orchestrator_service.py, +120 LOC)
-  - Native function calling for PRO model (100% valid JSON)
-  - Automatic fallback to prompt-based planning
-  - 20% fewer tokens vs prompt-based
-  - Type-safe schema enforcement
+**Componentes implementados:**
+- `query_engine.py` - Engine principal (loop de raciocínio + tools)
+- `model_registry.py` - Gerenciamento de modelos (Gemini/Ollama/DeepInfra)
+- `tools/` - Tool registry + builtins (file, shell, web, vision, memory, search, code)
+- `hooks/` - Hook manager (pre/post tool execution)
+- `compact/` - Context compaction automática
+- `permissions/` - Permission manager (auto/supervised)
+- `plugins/` - Plugin loader
+- `agents/` - Agent spawner
 
-**Total Phase 3 Code:** 1,084 LOC added
-**Performance Impact:**
-- 4x faster updates (WebSocket vs HTTP polling)
-- 80% less backend load
-- <500ms latency for real-time updates
-- 0 race conditions (thread-safe TPM manager)
+**Router:** `/engine/v2/execute` (ativado via `engine_v2_enabled=True` no .env)
+
+**Frontend:** `engine-store.ts` (Zustand) — conecta ao novo engine via WebSocket
 
 ### ✅ Fase 4 - Mobile PWA (COMPLETED)
 
@@ -338,7 +291,7 @@ packages/web/
     └── styles/       # Mobile-first CSS
 
 packages/shared/src/
-├── types/            # TypeScript types (api, persona, chat, memory, agent, agent-mode)
+├── types/            # TypeScript types (api, persona, chat, memory, llm, engine)
 ├── themes/           # 17 persona themes
 └── api-client/       # AhriApiClient class
 ```
@@ -460,22 +413,22 @@ npm run type-check --workspaces
 - Does NOT accept a `model` parameter - call `set_mode("PRO"|"GOOGLE"|"DEEPSEEK"|"LOCAL")` before generating
 - Valid modes: `"PRO"`, `"GOOGLE"`, `"DEEPSEEK"`, `"LOCAL"`
 
-### Worker Architecture
-- All workers extend `BaseWorker(llm_service, worker_type, default_model)`
-- `_call_llm(prompt, model=None, schema=None)` - model param uses mode strings ("GOOGLE", "PRO"), not raw model paths
-- `_create_task_record(db, execution_id, input_data)` - creates DB record with RUNNING status
-- `_complete_task(db, task, output_data, tokens_used, start_time)` - marks task as completed
-- `_fail_task(db, task, error, start_time)` - marks task as failed
+### V4 Engine
+- Localizado em `src/engine/` — ativado via `engine_v2_enabled=True` no `.env`
+- `QueryEngine` é o ponto de entrada; inicializado no `lifespan()` do `main.py`
+- Tools são registradas via `ToolRegistry`; hooks via `HookManager`
+- `PermissionLevel` do engine está em `src/engine/tools/base.py` (independente dos schemas)
 
 ### Frontend State (Zustand)
 - Never mutate state directly with `.push()` - always use immutable patterns: `[...state.array, newItem]`
-- Desktop uses 5 stores, Web uses 3 stores (no agent stores in PWA)
+- Desktop: `auth`, `persona`, `chat`, `engine`, `ui`, `theme`, `i18n` stores
+- Web PWA: `auth`, `persona`, `chat` stores (sem engine stores)
 - Shared API client is in `@ahri/shared` package
 
 ### Common Pitfalls
 - Import styles are mixed: backend uses both `from src.x import y` (absolute) and `from ...x import y` (relative)
 - `datetime` fields in Pydantic schemas serialize to ISO strings in JSON responses automatically
-- WebSocket endpoints: `/chat/ws` (chat), `/agent-mode/ws/{execution_id}` (agent mode)
+- WebSocket endpoint de chat: `/chat/ws`
 
 ---
 

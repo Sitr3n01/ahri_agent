@@ -6,7 +6,6 @@ import { api } from './client';
 type ChunkHandler = (content: string) => void;
 type DoneHandler = (data: {
   content: string;
-  agent_tasks: unknown[];
   memory_notifications: string[];
 }) => void;
 type ErrorHandler = (error: string) => void;

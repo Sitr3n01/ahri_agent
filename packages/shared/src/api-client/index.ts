@@ -6,8 +6,6 @@
 import type { TokenResponse, HealthResponse } from '../types/api.js';
 import type { PersonaListResponse, PersonaDetail } from '../types/persona.js';
 import type { ChatRequest, ChatResponse, SessionSummary, SessionDetail } from '../types/chat.js';
-import type { AgentTask } from '../types/agent.js';
-import type { AgentExecution, AgentSession, AgentWorkerTask, AgentModeExecuteRequest } from '../types/agent-mode.js';
 import type {
   UserProfile, SpotifyContext, AutoProfile, AutoProfilePatch,
   RagFileInfo, RagStats, RagMemoryItem, SocialGraphPlatform,
@@ -380,22 +378,6 @@ export class AhriApiClient {
   }
 
   // =========================================================================
-  // Agent
-  // =========================================================================
-
-  async executeAgentTask(capability: string, parameters: Record<string, unknown> = {}): Promise<AgentTask> {
-    return this.request<AgentTask>('POST', '/agent/execute', { capability, parameters });
-  }
-
-  async approveAgentTask(taskId: number): Promise<AgentTask> {
-    return this.request<AgentTask>('POST', `/agent/${taskId}/approve`);
-  }
-
-  async getAgentTaskStatus(taskId: number): Promise<AgentTask> {
-    return this.request<AgentTask>('GET', `/agent/${taskId}/status`);
-  }
-
-  // =========================================================================
   // Search
   // =========================================================================
 
@@ -413,77 +395,6 @@ export class AhriApiClient {
 
   async syncPersonaByMusic(): Promise<{ switched: boolean; persona: string }> {
     return this.request('POST', '/spotify/sync-persona');
-  }
-
-  // =========================================================================
-  // Agent Mode
-  // =========================================================================
-
-  async executeAgentMode(
-    goal: string,
-    orchestratorModel = 'gemini-3.1-flash-lite-preview',
-    options?: {
-      reasoning_level?: string;
-      enable_thinking?: boolean;
-      internet_search_enabled?: boolean;
-      images?: string[];
-      permission_mode?: string;
-      agent_session_id?: number;
-    }
-  ): Promise<AgentExecution> {
-    return this.request<AgentExecution>('POST', '/agent-mode/execute', {
-      goal,
-      orchestrator_model: orchestratorModel,
-      ...(options || {}),
-    });
-  }
-
-  async approveExecution(executionId: number): Promise<AgentExecution> {
-    return this.request<AgentExecution>('POST', `/agent-mode/${executionId}/approve`);
-  }
-
-  async cancelAgentMode(executionId: number): Promise<AgentExecution> {
-    return this.request<AgentExecution>('POST', `/agent-mode/${executionId}/cancel`);
-  }
-
-  async rejectExecution(executionId: number): Promise<AgentExecution> {
-    return this.request<AgentExecution>('POST', `/agent-mode/${executionId}/reject`);
-  }
-
-  async approveWorkerTask(taskId: number): Promise<AgentWorkerTask> {
-    return this.request<AgentWorkerTask>('POST', `/agent-mode/worker/${taskId}/approve`);
-  }
-
-  async skipWorkerTask(taskId: number): Promise<AgentWorkerTask> {
-    return this.request<AgentWorkerTask>('POST', `/agent-mode/worker/${taskId}/skip`);
-  }
-
-  async getAgentModeStatus(executionId: number): Promise<AgentExecution> {
-    return this.request<AgentExecution>('GET', `/agent-mode/${executionId}/status`);
-  }
-
-  async getAgentModeWorkers(executionId: number): Promise<AgentWorkerTask[]> {
-    return this.request<AgentWorkerTask[]>('GET', `/agent-mode/${executionId}/workers`);
-  }
-
-  // =========================================================================
-  // Agent Sessions
-  // =========================================================================
-
-  async getAgentSessions(): Promise<AgentSession[]> {
-    return this.request<AgentSession[]>('GET', '/agent-mode/sessions/list');
-  }
-
-  async createAgentSession(): Promise<AgentSession> {
-    return this.request<AgentSession>('POST', '/agent-mode/sessions/create');
-  }
-
-  async getAgentSession(sessionId: number): Promise<AgentSession> {
-    return this.request<AgentSession>('GET', `/agent-mode/sessions/${sessionId}`);
-  }
-
-  async deleteAgentSession(sessionId: number): Promise<void> {
-    return this.request<void>('DELETE', `/agent-mode/sessions/${sessionId}`);
   }
 
   // =========================================================================
@@ -517,16 +428,6 @@ export class AhriApiClient {
   createChatWebSocket(): WebSocket {
     const wsUrl = this.baseUrl.replace(/^http/, 'ws');
     return new WebSocket(`${wsUrl}/chat/ws`);
-  }
-
-  createAgentWebSocket(): WebSocket {
-    const wsUrl = this.baseUrl.replace(/^http/, 'ws');
-    return new WebSocket(`${wsUrl}/agent/ws`);
-  }
-
-  createAgentModeWebSocket(executionId: number): WebSocket {
-    const wsUrl = this.baseUrl.replace(/^http/, 'ws');
-    return new WebSocket(`${wsUrl}/agent-mode/ws/${executionId}`);
   }
 
   // =========================================================================

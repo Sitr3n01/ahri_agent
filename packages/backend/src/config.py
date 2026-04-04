@@ -63,39 +63,14 @@ class Settings(BaseSettings):
     gh_token: str = ""
     gist_id: str = ""
 
-    # --- Agent Mode ---
-    agent_mode_enabled: bool = True
-    agent_mode_orchestrator: str = "gemini-3.1-flash-lite-preview"  # Lite for planning
-    google_ai_studio_api_key: str = ""  # Additional API key (free tier, used as 6th agent key)
-    deepinfra_api_key: str = ""  # DeepInfra backup key
+    # --- LLM Providers ---
+    google_ai_studio_api_key: str = ""  # Additional Google AI Studio key
+    deepinfra_api_key: str = ""         # DeepInfra backup key
     ollama_base_url: str = "http://localhost:11434"  # Local self-hosted option
-
-    # --- Agent Mode v2 (Qwen + Flash Lite) ---
-    agent_mode_rpm_limit: int = 15          # requests/min per API key (Gemini Flash Lite free tier)
-    agent_mode_tpm_limit: int = 250000      # 250k TPM context (Gemini Flash Lite)
-    agent_mode_max_parallel: int = 10       # max simultaneous workers
-    agent_mode_local_model: str = "qwen3:8b"  # Ollama local model
-    agent_mode_api_model: str = "gemini-3.1-flash-lite-preview"  # API model for agents
 
     # --- Compaction ---
     compaction_threshold: int = 30       # Compact when history > N messages
     compaction_recent_window: int = 15   # Keep last N messages uncompacted
-
-    # --- Agent Mode API Keys (round-robin, up to 6 keys × 15 RPM = 90 RPM total) ---
-    agent_api_key_1: str = ""
-    agent_api_key_2: str = ""
-    agent_api_key_3: str = ""
-    agent_api_key_4: str = ""
-    agent_api_key_5: str = ""
-
-    @property
-    def agent_api_keys(self) -> list[str]:
-        """Returns list of non-empty agent API keys for round-robin rotation."""
-        return [k for k in [
-            self.agent_api_key_1, self.agent_api_key_2, self.agent_api_key_3,
-            self.agent_api_key_4, self.agent_api_key_5,
-            self.google_ai_studio_api_key,
-        ] if k]
 
     @property
     def root_dir(self) -> Path:
